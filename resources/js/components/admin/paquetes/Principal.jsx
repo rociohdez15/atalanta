@@ -10,77 +10,267 @@ const Principal = () => {
         navigate(`/paquete/${id}`);
     };
 
-    const [currentPage, setCurrentPage] = useState(1); // Página actual
-    const [entriesPerPage] = useState(10); // Número de registros por página
+    /*
+    |--------------------------------------------------------------------------
+    | ESTADOS
+    |--------------------------------------------------------------------------
+    */
+
+    const [currentPage, setCurrentPage] = useState(1);
+
+    // Número de paquetes que queremos mostrar por página
+    const entriesPerPage = 10;
+
     const [loading, setLoading] = useState(true);
 
-    // Inicialización
-    const [paquetes, setPaquetes] = useState([]); // Lista original
-    const [paquetesFiltrados, setPaquetesFiltrados] = useState([]); // Lista visible (filtrada)
-    const [searchTerm, setSearchTerm] = useState("");
-    const [totalPages, setTotalPages] = useState(1);
+    // TODOS los paquetes recibidos de la API
+    const [paquetes, setPaquetes] = useState([]);
 
-    // Al cargar los paquetes
-    useEffect(() => {
+    // Paquetes que se muestran actualmente
+    const [paquetesFiltrados, setPaquetesFiltrados] = useState([]);
+
+    const [searchTerm, setSearchTerm] = useState("");
+
+    /*
+    |--------------------------------------------------------------------------
+    | CARGAR TODOS LOS PAQUETES
+    |--------------------------------------------------------------------------
+    |
+    | IMPORTANTE:
+    | Antes se enviaba:
+    |
+    | page: currentPage - 1
+    | size: 10
+    |
+    | Eso hacía que la API devolviera únicamente una página.
+    |
+    | Ahora pedimos una cantidad grande de paquetes y hacemos
+    | la paginación directamente en React.
+    |
+    */
+
+    const cargarPaquetes = async () => {
         setLoading(true);
 
-        axios
-            .get(`/api/paquetes`, {
+        try {
+            const res = await axios.get("/api/paquetes/admin", {
                 params: {
-                    page: currentPage - 1,
-                    size: entriesPerPage,
+                    page: 0,
+                    size: 1000,
                 },
-            })
-            .then((res) => {
-                const data = res.data.content;
-                setPaquetes(data);
-                setPaquetesFiltrados(data);
-                setTotalPages(res.data.totalPages);
-            })
-            .catch(() => {
-                setPaquetes([]);
-                setPaquetesFiltrados([]);
-            })
-            .finally(() => {
-                setLoading(false);
             });
-    }, [currentPage]);
 
-    // Efecto de búsqueda
+            /*
+            |--------------------------------------------------------------------------
+            | OBTENER LOS DATOS
+            |--------------------------------------------------------------------------
+            */
+
+            let data = [];
+
+            if (Array.isArray(res.data)) {
+                data = res.data;
+            } else if (Array.isArray(res.data.content)) {
+                data = res.data.content;
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | SIN FILTROS
+            |--------------------------------------------------------------------------
+            |
+            | Todos los paquetes recibidos se muestran.
+            |
+            */
+
+            setPaquetes(data);
+            setPaquetesFiltrados(data);
+
+            setCurrentPage(1);
+        } catch (error) {
+            console.error(
+                "Error cargando paquetes:",
+                error
+            );
+
+            setPaquetes([]);
+            setPaquetesFiltrados([]);
+
+            Swal.fire(
+                "Error",
+                "No se pudieron cargar los paquetes.",
+                "error"
+            );
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    /*
+    |--------------------------------------------------------------------------
+    | CARGAR AL INICIAR
+    |--------------------------------------------------------------------------
+    */
+
     useEffect(() => {
-        const delayDebounce = setTimeout(() => {
-            if (searchTerm.trim() === "") {
-                setPaquetesFiltrados(paquetes); // Restaurar todos los paquetes
+        cargarPaquetes();
+    }, []);
+
+    /*
+    |--------------------------------------------------------------------------
+    | BÚSQUEDA
+    |--------------------------------------------------------------------------
+    |
+    | La búsqueda sigue utilizando el endpoint:
+    |
+    | /api/paquetes/buscar
+    |
+    | pero tampoco se aplica ningún filtro de ofertas.
+    |
+    */
+
+    useEffect(() => {
+        const delayDebounce = setTimeout(async () => {
+            const termino = searchTerm.trim();
+
+            /*
+            |--------------------------------------------------------------------------
+            | SIN TEXTO DE BÚSQUEDA
+            |--------------------------------------------------------------------------
+            */
+
+            if (termino === "") {
+                setPaquetesFiltrados(paquetes);
+                setCurrentPage(1);
+
                 return;
             }
 
-            axios
-                .get(`/api/paquetes/buscar?input=${searchTerm}`)
-                .then((res) => {
-                    const data = Array.isArray(res.data)
-                        ? res.data
-                        : [res.data];
-                    setPaquetesFiltrados(data); // Actualizar la lista visible
-                    setCurrentPage(1);
-                });
+            /*
+            |--------------------------------------------------------------------------
+            | BUSCAR
+            |--------------------------------------------------------------------------
+            */
+
+            try {
+                const res = await axios.get(
+                    "/api/paquetes/buscar",
+                    {
+                        params: {
+                            input: termino,
+                        },
+                    }
+                );
+
+                let data = [];
+
+                if (Array.isArray(res.data)) {
+                    data = res.data;
+                } else if (
+                    Array.isArray(res.data.content)
+                ) {
+                    data = res.data.content;
+                } else if (res.data) {
+                    data = [res.data];
+                }
+
+                /*
+                |--------------------------------------------------------------------------
+                | SIN FILTRAR POR OFERTA
+                |--------------------------------------------------------------------------
+                */
+
+                setPaquetesFiltrados(data);
+                setCurrentPage(1);
+            } catch (error) {
+                console.error(
+                    "Error buscando paquetes:",
+                    error
+                );
+
+                setPaquetesFiltrados([]);
+                setCurrentPage(1);
+            }
         }, 300);
 
         return () => clearTimeout(delayDebounce);
-    }, [searchTerm, paquetes]); // Asegúrate de tener paquetes como dependencia por si cambia
+    }, [searchTerm, paquetes]);
 
-    // Cálculo de los registros para mostrar según la página actual
-    const indexOfLastAdmin = currentPage * entriesPerPage;
-    const indexOfFirstAdmin = indexOfLastAdmin - entriesPerPage;
-    const currentAdmins = paquetesFiltrados; // Ya está paginado
+    /*
+    |--------------------------------------------------------------------------
+    | PAGINACIÓN LOCAL
+    |--------------------------------------------------------------------------
+    */
 
-    // Función para manejar el cambio de página
-    const paginate = (pageNumber) => setCurrentPage(pageNumber);
+    const indexOfLastPackage =
+        currentPage * entriesPerPage;
 
-    // Número total de páginas
+    const indexOfFirstPackage =
+        indexOfLastPackage - entriesPerPage;
+
+    const currentPackages =
+        paquetesFiltrados.slice(
+            indexOfFirstPackage,
+            indexOfLastPackage
+        );
+
+    /*
+    |--------------------------------------------------------------------------
+    | TOTAL DE PÁGINAS
+    |--------------------------------------------------------------------------
+    */
+
+    const totalPages = Math.max(
+        1,
+        Math.ceil(
+            paquetesFiltrados.length /
+                entriesPerPage
+        )
+    );
+
+    /*
+    |--------------------------------------------------------------------------
+    | NÚMEROS DE PÁGINA
+    |--------------------------------------------------------------------------
+    */
+
     const pageNumbers = [];
-    for (let i = 1; i <= totalPages; i++) {
+
+    for (
+        let i = 1;
+        i <= totalPages;
+        i++
+    ) {
         pageNumbers.push(i);
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | CAMBIAR DE PÁGINA
+    |--------------------------------------------------------------------------
+    */
+
+    const paginate = (pageNumber) => {
+        if (
+            pageNumber < 1 ||
+            pageNumber > totalPages
+        ) {
+            return;
+        }
+
+        setCurrentPage(pageNumber);
+
+        window.scrollTo({
+            top: 0,
+            behavior: "smooth",
+        });
+    };
+
+    /*
+    |--------------------------------------------------------------------------
+    | ELIMINAR
+    |--------------------------------------------------------------------------
+    */
 
     const handleDelete = (id) => {
         Swal.fire({
@@ -92,433 +282,1155 @@ const Principal = () => {
             cancelButtonColor: "#3085d6",
             confirmButtonText: "Sí, eliminar",
             cancelButtonText: "Cancelar",
-        }).then((result) => {
-            if (result.isConfirmed) {
-                axios
-                    .delete(`/api/paquetes/eliminar/${id}`)
-                    .then(() => {
-                        setPaquetes((prev) =>
-                            prev.filter((admin) => admin.id !== id),
-                        );
-                        setPaquetesFiltrados((prev) =>
-                            prev.filter((admin) => admin.id !== id),
+        }).then(async (result) => {
+            if (!result.isConfirmed) {
+                return;
+            }
+
+            try {
+                await axios.delete(
+                    `/api/paquetes/eliminar/${id}`
+                );
+
+                /*
+                |--------------------------------------------------------------------------
+                | ELIMINAR DE LA LISTA PRINCIPAL
+                |--------------------------------------------------------------------------
+                */
+
+                setPaquetes((prev) =>
+                    prev.filter(
+                        (paquete) =>
+                            paquete.id !== id
+                    )
+                );
+
+                /*
+                |--------------------------------------------------------------------------
+                | ELIMINAR DE LA LISTA VISIBLE
+                |--------------------------------------------------------------------------
+                */
+
+                setPaquetesFiltrados((prev) =>
+                    prev.filter(
+                        (paquete) =>
+                            paquete.id !== id
+                    )
+                );
+
+                /*
+                |--------------------------------------------------------------------------
+                | AJUSTAR PÁGINA SI ERA LA ÚLTIMA
+                |--------------------------------------------------------------------------
+                */
+
+                setCurrentPage((prevPage) => {
+                    const nuevosTotalPages =
+                        Math.max(
+                            1,
+                            Math.ceil(
+                                (paquetesFiltrados.length -
+                                    1) /
+                                    entriesPerPage
+                            )
                         );
 
-                        Swal.fire(
-                            "Eliminado",
-                            "La paquete ha sido eliminado correctamente.",
-                            "success",
-                        );
-                    })
-                    .catch((err) => {
-                        Swal.fire(
-                            "Error",
-                            "No se pudo eliminar el paquete.",
-                            "error",
-                        );
-                    });
+                    return Math.min(
+                        prevPage,
+                        nuevosTotalPages
+                    );
+                });
+
+                Swal.fire(
+                    "Eliminado",
+                    "El paquete ha sido eliminado correctamente.",
+                    "success"
+                );
+            } catch (error) {
+                console.error(
+                    "Error eliminando paquete:",
+                    error
+                );
+
+                Swal.fire(
+                    "Error",
+                    "No se pudo eliminar el paquete.",
+                    "error"
+                );
             }
         });
     };
 
+    /*
+    |--------------------------------------------------------------------------
+    | EDITAR
+    |--------------------------------------------------------------------------
+    */
+
     const handleEdit = async (id) => {
-        const paquete = paquetes.find((p) => p.id === id);
-        if (!paquete) return;
+        const paquete = paquetes.find(
+            (p) => p.id === id
+        );
+
+        if (!paquete) {
+            return;
+        }
 
         let selectedImage = null;
-        const baseImageUrl = `/storage/paquetes/portada/${paquete.id}/${paquete.foto}`;
+
+        const baseImageUrl =
+            `/storage/paquetes/portada/${paquete.id}/${paquete.foto}`;
 
         await Swal.fire({
             title: "Editar Paquete",
-            html: `
-            <input id="swal-nombre" class="swal2-input" placeholder="Nombre" value="${paquete.nombre}">
-            <input id="swal-fecha-inicio" type="date" class="swal2-input" value="${paquete.fecha_inicio.slice(0, 10)}">
-            <input id="swal-fecha-fin" type="date" class="swal2-input" value="${paquete.fecha_fin.slice(0, 10)}">
-            <input id="swal-precio" type="number" class="swal2-input" placeholder="Precio" value="${paquete.precio}">
-            <input id="swal-tipo" class="swal2-input" placeholder="Tipo de viaje" value="${paquete.tipo_viaje}">
-            <textarea id="swal-desc" class="swal2-textarea" placeholder="Descripción">${paquete.descripcion}</textarea>
-            <input id="swal-foto" type="file" class="swal2-file" accept="image/*">
-            <img id="preview-image" src="${baseImageUrl}" style="max-width: 100%; margin-top: 10px;" />
-            <input id="swal-plazas" type="number" class="swal2-input" placeholder="Plazas" value="${paquete.plazas}">
-        `,
-            didOpen: () => {
-                const fileInput = document.getElementById("swal-foto");
-                const preview = document.getElementById("preview-image");
 
-                fileInput.addEventListener("change", (e) => {
-                    const file = e.target.files[0];
-                    if (file) {
+            html: `
+                <input
+                    id="swal-nombre"
+                    class="swal2-input"
+                    placeholder="Nombre"
+                    value="${paquete.nombre || ""}"
+                >
+
+                <input
+                    id="swal-fecha-inicio"
+                    type="date"
+                    class="swal2-input"
+                    value="${
+                        paquete.fecha_inicio
+                            ? String(
+                                  paquete.fecha_inicio
+                              ).slice(0, 10)
+                            : ""
+                    }"
+                >
+
+                <input
+                    id="swal-fecha-fin"
+                    type="date"
+                    class="swal2-input"
+                    value="${
+                        paquete.fecha_fin
+                            ? String(
+                                  paquete.fecha_fin
+                              ).slice(0, 10)
+                            : ""
+                    }"
+                >
+
+                <input
+                    id="swal-precio"
+                    type="number"
+                    step="0.01"
+                    class="swal2-input"
+                    placeholder="Precio"
+                    value="${paquete.precio || ""}"
+                >
+
+                <input
+                    id="swal-tipo"
+                    class="swal2-input"
+                    placeholder="Tipo de viaje"
+                    value="${paquete.tipo_viaje || ""}"
+                >
+
+                <select
+                    id="swal-oferta"
+                    class="swal2-select"
+                    style="width: 80%; margin: 1em auto;"
+                >
+
+                    <option
+                        value=""
+                        ${
+                            !paquete.oferta
+                                ? "selected"
+                                : ""
+                        }
+                    >
+                        Sin oferta
+                    </option>
+
+                    <option
+                        value="navidad"
+                        ${
+                            paquete.oferta ===
+                            "navidad"
+                                ? "selected"
+                                : ""
+                        }
+                    >
+                        Navidad
+                    </option>
+
+                    <option
+                        value="verano"
+                        ${
+                            paquete.oferta ===
+                            "verano"
+                                ? "selected"
+                                : ""
+                        }
+                    >
+                        Verano
+                    </option>
+
+                    <option
+                        value="san_valentin"
+                        ${
+                            paquete.oferta ===
+                            "san_valentin"
+                                ? "selected"
+                                : ""
+                        }
+                    >
+                        San Valentín
+                    </option>
+
+                    <option
+                        value="black_friday"
+                        ${
+                            paquete.oferta ===
+                            "black_friday"
+                                ? "selected"
+                                : ""
+                        }
+                    >
+                        Black Friday
+                    </option>
+
+                    <option
+                        value="cyber_monday"
+                        ${
+                            paquete.oferta ===
+                            "cyber_monday"
+                                ? "selected"
+                                : ""
+                        }
+                    >
+                        Cyber Monday
+                    </option>
+
+                    <option
+                        value="bajada_precio"
+                        ${
+                            paquete.oferta ===
+                            "bajada_precio"
+                                ? "selected"
+                                : ""
+                        }
+                    >
+                        Bajada de precio
+                    </option>
+
+                </select>
+
+                <div
+                    style="
+                        width: 80%;
+                        margin: 15px auto;
+                        text-align: left;
+                    "
+                >
+
+                    <label
+                        for="swal-oferta-inicio"
+                        style="
+                            display: block;
+                            margin-bottom: 5px;
+                            font-weight: 600;
+                        "
+                    >
+                        Inicio de la oferta
+                    </label>
+
+                    <input
+                        id="swal-oferta-inicio"
+                        type="datetime-local"
+                        class="swal2-input"
+                        style="
+                            width: 100%;
+                            margin: 0;
+                        "
+                        value="${
+                            paquete.oferta_inicio
+                                ? String(
+                                      paquete.oferta_inicio
+                                  ).slice(0, 16)
+                                : ""
+                        }"
+                    >
+
+                </div>
+
+                <div
+                    style="
+                        width: 80%;
+                        margin: 15px auto;
+                        text-align: left;
+                    "
+                >
+
+                    <label
+                        for="swal-oferta-fin"
+                        style="
+                            display: block;
+                            margin-bottom: 5px;
+                            font-weight: 600;
+                        "
+                    >
+                        Fin de la oferta
+                    </label>
+
+                    <input
+                        id="swal-oferta-fin"
+                        type="datetime-local"
+                        class="swal2-input"
+                        style="
+                            width: 100%;
+                            margin: 0;
+                        "
+                        value="${
+                            paquete.oferta_fin
+                                ? String(
+                                      paquete.oferta_fin
+                                  ).slice(0, 16)
+                                : ""
+                        }"
+                    >
+
+                </div>
+
+                <textarea
+                    id="swal-desc"
+                    class="swal2-textarea"
+                    placeholder="Descripción"
+                >${paquete.descripcion || ""}</textarea>
+
+                <input
+                    id="swal-foto"
+                    type="file"
+                    class="swal2-file"
+                    accept="image/*"
+                >
+
+                <img
+                    id="preview-image"
+                    src="${baseImageUrl}"
+                    style="
+                        max-width: 100%;
+                        margin-top: 10px;
+                    "
+                />
+
+                <input
+                    id="swal-plazas"
+                    type="number"
+                    class="swal2-input"
+                    placeholder="Plazas"
+                    value="${paquete.plazas ?? ""}"
+                >
+            `,
+
+            didOpen: () => {
+                const fileInput =
+                    document.getElementById(
+                        "swal-foto"
+                    );
+
+                const preview =
+                    document.getElementById(
+                        "preview-image"
+                    );
+
+                if (
+                    !fileInput ||
+                    !preview
+                ) {
+                    return;
+                }
+
+                fileInput.addEventListener(
+                    "change",
+                    (e) => {
+                        const file =
+                            e.target.files[0];
+
+                        if (!file) {
+                            return;
+                        }
+
                         selectedImage = file;
 
-                        const reader = new FileReader();
-                        reader.onload = function (event) {
-                            preview.src = event.target.result;
-                        };
-                        reader.readAsDataURL(file);
+                        const reader =
+                            new FileReader();
+
+                        reader.onload =
+                            function (event) {
+                                preview.src =
+                                    event.target.result;
+                            };
+
+                        reader.readAsDataURL(
+                            file
+                        );
                     }
-                });
+                );
             },
+
             focusConfirm: false,
-            confirmButtonText: "Guardar cambios",
+
+            confirmButtonText:
+                "Guardar cambios",
+
             preConfirm: () => {
+                const oferta =
+                    document.getElementById(
+                        "swal-oferta"
+                    ).value;
+
+                const ofertaInicio =
+                    document.getElementById(
+                        "swal-oferta-inicio"
+                    ).value;
+
+                const ofertaFin =
+                    document.getElementById(
+                        "swal-oferta-fin"
+                    ).value;
+
+                /*
+                |--------------------------------------------------------------------------
+                | VALIDAR BLACK FRIDAY
+                |--------------------------------------------------------------------------
+                */
+
+                if (
+                    oferta ===
+                    "black_friday"
+                ) {
+                    if (
+                        !ofertaInicio ||
+                        !ofertaFin
+                    ) {
+                        Swal.showValidationMessage(
+                            "Debes indicar el inicio y el fin de la oferta Black Friday."
+                        );
+
+                        return false;
+                    }
+
+                    const inicio =
+                        new Date(
+                            ofertaInicio
+                        );
+
+                    const fin =
+                        new Date(
+                            ofertaFin
+                        );
+
+                    if (fin <= inicio) {
+                        Swal.showValidationMessage(
+                            "La fecha de fin debe ser posterior a la fecha de inicio."
+                        );
+
+                        return false;
+                    }
+                }
+
                 return {
-                    nombre: document.getElementById("swal-nombre").value,
+                    nombre:
+                        document.getElementById(
+                            "swal-nombre"
+                        ).value,
+
                     fecha_inicio:
-                        document.getElementById("swal-fecha-inicio").value,
-                    fecha_fin: document.getElementById("swal-fecha-fin").value,
-                    precio: parseFloat(
-                        document.getElementById("swal-precio").value,
-                    ),
-                    tipo_viaje: document.getElementById("swal-tipo").value,
-                    descripcion: document.getElementById("swal-desc").value,
-                    fotoFile: selectedImage, // null si no cambió
-                    plazas: parseInt(
-                        document.getElementById("swal-plazas").value,
-                    ),
+                        document.getElementById(
+                            "swal-fecha-inicio"
+                        ).value,
+
+                    fecha_fin:
+                        document.getElementById(
+                            "swal-fecha-fin"
+                        ).value,
+
+                    precio:
+                        parseFloat(
+                            document.getElementById(
+                                "swal-precio"
+                            ).value
+                        ),
+
+                    tipo_viaje:
+                        document.getElementById(
+                            "swal-tipo"
+                        ).value,
+
+                    oferta,
+
+                    oferta_inicio:
+                        ofertaInicio ||
+                        null,
+
+                    oferta_fin:
+                        ofertaFin ||
+                        null,
+
+                    descripcion:
+                        document.getElementById(
+                            "swal-desc"
+                        ).value,
+
+                    fotoFile:
+                        selectedImage,
+
+                    plazas:
+                        parseInt(
+                            document.getElementById(
+                                "swal-plazas"
+                            ).value
+                        ),
                 };
             },
         }).then(async (result) => {
-            if (!result.isConfirmed || !result.value) return;
-
-            const formValues = result.value;
-            const formData = new FormData();
-            formData.append("_method", "PUT");
-            formData.append("nombre", formValues.nombre);
-            formData.append("fecha_inicio", formValues.fecha_inicio);
-            formData.append("fecha_fin", formValues.fecha_fin);
-            formData.append("precio", formValues.precio);
-            formData.append("tipo_viaje", formValues.tipo_viaje);
-            formData.append("descripcion", formValues.descripcion);
-            formData.append("plazas", formValues.plazas);
-
-            if (formValues.fotoFile) {
-                formData.append("foto", formValues.fotoFile);
+            if (
+                !result.isConfirmed ||
+                !result.value
+            ) {
+                return;
             }
-            // Si no cambió la imagen, no envías nada en 'foto', manteniendo la ruta base
+
+            const formValues =
+                result.value;
+
+            const formData =
+                new FormData();
+
+            formData.append(
+                "_method",
+                "PUT"
+            );
+
+            formData.append(
+                "nombre",
+                formValues.nombre
+            );
+
+            formData.append(
+                "fecha_inicio",
+                formValues.fecha_inicio
+            );
+
+            formData.append(
+                "fecha_fin",
+                formValues.fecha_fin
+            );
+
+            formData.append(
+                "precio",
+                formValues.precio
+            );
+
+            formData.append(
+                "tipo_viaje",
+                formValues.tipo_viaje
+            );
+
+            formData.append(
+                "oferta",
+                formValues.oferta
+            );
+
+            if (
+                formValues.oferta_inicio
+            ) {
+                formData.append(
+                    "oferta_inicio",
+                    formValues.oferta_inicio
+                );
+            }
+
+            if (
+                formValues.oferta_fin
+            ) {
+                formData.append(
+                    "oferta_fin",
+                    formValues.oferta_fin
+                );
+            }
+
+            formData.append(
+                "descripcion",
+                formValues.descripcion
+            );
+
+            formData.append(
+                "plazas",
+                formValues.plazas
+            );
+
+            if (
+                formValues.fotoFile
+            ) {
+                formData.append(
+                    "foto",
+                    formValues.fotoFile
+                );
+            }
 
             try {
-                const res = await axios.post(
-                    `/api/paquetes/editar/${id}`,
-                    formData,
-                    {
-                        headers: { "Content-Type": "multipart/form-data" },
-                    },
-                );
+                const res =
+                    await axios.post(
+                        `/api/paquetes/editar/${id}`,
+                        formData,
+                        {
+                            headers: {
+                                "Content-Type":
+                                    "multipart/form-data",
+                            },
+                        }
+                    );
 
                 Swal.fire(
                     "Éxito",
                     "El paquete se actualizó correctamente",
-                    "success",
+                    "success"
                 );
 
-                const updatedData = res.data;
+                /*
+                |--------------------------------------------------------------------------
+                | DATOS ACTUALIZADOS
+                |--------------------------------------------------------------------------
+                */
+
+                const updatedData =
+                    res.data.paquete ||
+                    res.data;
+
+                /*
+                |--------------------------------------------------------------------------
+                | ACTUALIZAR TODOS LOS PAQUETES
+                |--------------------------------------------------------------------------
+                */
 
                 setPaquetes((prev) =>
                     prev.map((p) =>
-                        p.id === id ? { ...p, ...updatedData } : p,
-                    ),
+                        p.id === id
+                            ? {
+                                  ...p,
+                                  ...updatedData,
+                              }
+                            : p
+                    )
                 );
-                setPaquetesFiltrados((prev) =>
-                    prev.map((p) =>
-                        p.id === id ? { ...p, ...updatedData } : p,
-                    ),
+
+                /*
+                |--------------------------------------------------------------------------
+                | ACTUALIZAR LISTA VISIBLE
+                |--------------------------------------------------------------------------
+                */
+
+                setPaquetesFiltrados(
+                    (prev) =>
+                        prev.map((p) =>
+                            p.id === id
+                                ? {
+                                      ...p,
+                                      ...updatedData,
+                                  }
+                                : p
+                        )
                 );
             } catch (error) {
-                Swal.fire("Error", "No se pudo actualizar el paquete", "error");
+                console.error(
+                    "Error actualizando paquete:",
+                    error
+                );
+
+                Swal.fire(
+                    "Error",
+                    error.response
+                        ?.data
+                        ?.message ||
+                        "No se pudo actualizar el paquete",
+                    "error"
+                );
             }
         });
     };
+
+    /*
+    |--------------------------------------------------------------------------
+    | RENDER
+    |--------------------------------------------------------------------------
+    */
+
     return (
         <div className="content-page">
             <div className="content">
-                {/* Start Content*/}
                 <div className="container-fluid">
-                    {/* start page title */}
+
+                    {/* TÍTULO */}
+
                     <div className="row">
                         <div className="col-12">
                             <div className="page-title-box">
+
                                 <h4 className="page-title text-center">
                                     Listado de Paquetes
                                 </h4>
+
                             </div>
                         </div>
                     </div>
 
-                    {/* Tabla */}
+                    {/* TABLA */}
+
                     <div className="container-fluid p-3">
+
+                        {/* BUSCADOR */}
+
                         <div className="d-flex flex-column flex-md-row justify-content-between align-items-center mb-3">
-                            <div className="d-flex align-items-center mb-2 mb-md-0"></div>
+
+                            <div className="d-flex align-items-center mb-2 mb-md-0">
+                            </div>
+
                             <div className="d-flex align-items-center">
+
                                 <label
                                     htmlFor="searchInput"
                                     className="me-2 mb-0"
                                 >
                                     Buscar:
                                 </label>
+
                                 <input
                                     id="searchInput"
                                     type="search"
                                     className="form-control form-control-sm"
-                                    style={{ width: 150 }}
-                                    value={searchTerm}
+                                    style={{
+                                        width: 150,
+                                    }}
+                                    value={
+                                        searchTerm
+                                    }
                                     onChange={(e) =>
-                                        setSearchTerm(e.target.value)
+                                        setSearchTerm(
+                                            e.target.value
+                                        )
                                     }
                                 />
+
                             </div>
                         </div>
+
+                        {/* TABLA */}
+
                         <div className="table-responsive p-3">
+
                             {loading ? (
                                 <div className="text-center mt-5">
+
                                     <div className="spinner-border text-primary"></div>
+
                                 </div>
                             ) : (
-                               <table className="table table-sm table-bordered align-middle mb-0">
+                                <table className="table table-sm table-bordered align-middle mb-0">
+
                                     <thead>
                                         <tr className="text-secondary text-nowrap">
-                                            <th
-                                                scope="col"
-                                                className="text-start"
-                                            >
+
+                                            <th className="text-start">
                                                 ID
                                             </th>
-                                            <th
-                                                scope="col"
-                                                className="text-start"
-                                            >
+
+                                            <th className="text-start">
                                                 Nombre
                                             </th>
-                                            <th
-                                                scope="col"
-                                                className="text-start"
-                                            >
+
+                                            <th className="text-start">
                                                 Fecha Inicio
                                             </th>
-                                            <th
-                                                scope="col"
-                                                className="text-start"
-                                            >
+
+                                            <th className="text-start">
                                                 Fecha Fin
                                             </th>
-                                            <th
-                                                scope="col"
-                                                className="text-start"
-                                            >
+
+                                            <th className="text-start">
                                                 Precio
                                             </th>
-                                            <th
-                                                scope="col"
-                                                className="text-start"
-                                            >
+
+                                            <th className="text-start">
                                                 Tipo de Viaje
                                             </th>
-                                            <th
-                                                scope="col"
-                                                className="text-start"
-                                            >
+
+                                            <th className="text-start">
+                                                Oferta
+                                            </th>
+
+                                            <th className="text-start">
+                                                Inicio Oferta
+                                            </th>
+
+                                            <th className="text-start">
+                                                Fin Oferta
+                                            </th>
+
+                                            <th className="text-start">
                                                 Descripción
                                             </th>
-                                            <th
-                                                scope="col"
-                                                className="text-start"
-                                            >
+
+                                            <th className="text-start">
                                                 Foto
                                             </th>
-                                            <th
-                                                scope="col"
-                                                className="text-start"
-                                            >
+
+                                            <th className="text-start">
                                                 Plazas
                                             </th>
-                                            <th
-                                                scope="col"
-                                                className="text-start"
-                                            >
+
+                                            <th className="text-start">
                                                 Operaciones
                                             </th>
+
                                         </tr>
                                     </thead>
+
                                     <tbody>
-                                        {loading ? (
-                                            <tr>
-                                                <td
-                                                    colSpan="10"
-                                                    className="text-center py-4"
-                                                >
-                                                    <div
-                                                        className="spinner-border text-primary"
-                                                        role="status"
-                                                    >
-                                                        <span className="visually-hidden">
-                                                            Cargando...
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ) : currentAdmins.length > 0 ? (
-                                            currentAdmins.map((paquete) => (
-                                                <tr
-                                                    key={paquete.id}
-                                                    onClick={() =>
-                                                        handleRowClick(
-                                                            paquete.id,
-                                                        )
-                                                    }
-                                                    style={{
-                                                        cursor: "pointer",
-                                                        position: "relative",
-                                                        backgroundColor:
-                                                            paquete.is_read
-                                                                ? "transparent"
-                                                                : "#f2f2f2",
-                                                    }}
-                                                >
-                                                    <td
+
+                                        {currentPackages.length >
+                                        0 ? (
+                                            currentPackages.map(
+                                                (paquete) => (
+                                                    <tr
+                                                        key={
+                                                            paquete.id
+                                                        }
+                                                        onClick={() =>
+                                                            handleRowClick(
+                                                                paquete.id
+                                                            )
+                                                        }
                                                         style={{
-                                                            paddingLeft: "25px",
+                                                            cursor:
+                                                                "pointer",
                                                             position:
                                                                 "relative",
+                                                            backgroundColor:
+                                                                paquete.is_read
+                                                                    ? "transparent"
+                                                                    : "#f2f2f2",
                                                         }}
                                                     >
-                                                        {paquete.id}
-                                                    </td>
-                                                    <td>{paquete.nombre}</td>
-                                                    <td>
-                                                        {paquete.fecha_inicio
-                                                            ? new Date(
-                                                                  paquete.fecha_inicio,
-                                                              ).toLocaleDateString(
-                                                                  "es-ES",
-                                                              )
-                                                            : "Sin datos"}
-                                                    </td>
-                                                    <td>
-                                                        {paquete.fecha_fin
-                                                            ? new Date(
-                                                                  paquete.fecha_fin,
-                                                              ).toLocaleDateString(
-                                                                  "es-ES",
-                                                              )
-                                                            : "Sin datos"}
-                                                    </td>
-                                                    <td>{paquete.precio} €</td>
-                                                    <td>
-                                                        {paquete.tipo_viaje}
-                                                    </td>
-                                                    <td>
-                                                        {paquete.descripcion}
-                                                    </td>
-                                                    <td>
-                                                        <img
-                                                            src={`/storage/paquetes/portada/${paquete.id}/${paquete.foto}`}
-                                                            alt={paquete.foto}
+
+                                                        <td
                                                             style={{
-                                                                width: 80,
-                                                                height: 50,
-                                                                objectFit:
-                                                                    "cover",
-                                                            }}
-                                                        />
-                                                    </td>
-                                                    <td>{paquete.plazas}</td>
-                                                    <td>
-                                                        <button
-                                                            className="btn btn-warning btn-sm me-2"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleEdit(
-                                                                    paquete.id,
-                                                                );
+                                                                paddingLeft:
+                                                                    "25px",
+                                                                position:
+                                                                    "relative",
                                                             }}
                                                         >
-                                                            <i className="fas fa-pencil-alt"></i>
-                                                        </button>
-                                                        <button
-                                                            className="btn btn-success btn-sm"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleDelete(
-                                                                    paquete.id,
-                                                                );
-                                                            }}
-                                                        >
-                                                            <i className="fas fa-trash-alt"></i>
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))
+                                                            {
+                                                                paquete.id
+                                                            }
+                                                        </td>
+
+                                                        <td>
+                                                            {
+                                                                paquete.nombre
+                                                            }
+                                                        </td>
+
+                                                        <td>
+                                                            {paquete.fecha_inicio
+                                                                ? new Date(
+                                                                      paquete.fecha_inicio
+                                                                  ).toLocaleDateString(
+                                                                      "es-ES"
+                                                                  )
+                                                                : "Sin datos"}
+                                                        </td>
+
+                                                        <td>
+                                                            {paquete.fecha_fin
+                                                                ? new Date(
+                                                                      paquete.fecha_fin
+                                                                  ).toLocaleDateString(
+                                                                      "es-ES"
+                                                                  )
+                                                                : "Sin datos"}
+                                                        </td>
+
+                                                        <td>
+                                                            {
+                                                                paquete.precio
+                                                            }{" "}
+                                                            €
+                                                        </td>
+
+                                                        <td>
+                                                            {
+                                                                paquete.tipo_viaje
+                                                            }
+                                                        </td>
+
+                                                        <td>
+                                                            {
+                                                                paquete.oferta ||
+                                                                "Sin oferta"
+                                                            }
+                                                        </td>
+
+                                                        <td>
+                                                            {paquete.oferta_inicio
+                                                                ? new Date(
+                                                                      paquete.oferta_inicio
+                                                                  ).toLocaleString(
+                                                                      "es-ES"
+                                                                  )
+                                                                : "—"}
+                                                        </td>
+
+                                                        <td>
+                                                            {paquete.oferta_fin
+                                                                ? new Date(
+                                                                      paquete.oferta_fin
+                                                                  ).toLocaleString(
+                                                                      "es-ES"
+                                                                  )
+                                                                : "—"}
+                                                        </td>
+
+                                                        <td>
+                                                            {
+                                                                paquete.descripcion
+                                                            }
+                                                        </td>
+
+                                                        <td>
+                                                            <img
+                                                                src={`/storage/paquetes/portada/${paquete.id}/${paquete.foto}`}
+                                                                alt={
+                                                                    paquete.foto ||
+                                                                    "Foto del paquete"
+                                                                }
+                                                                style={{
+                                                                    width: 80,
+                                                                    height: 50,
+                                                                    objectFit:
+                                                                        "cover",
+                                                                }}
+                                                            />
+                                                        </td>
+
+                                                        <td>
+                                                            {
+                                                                paquete.plazas
+                                                            }
+                                                        </td>
+
+                                                        <td>
+
+                                                            <button
+                                                                className="btn btn-warning btn-sm me-2"
+                                                                onClick={(
+                                                                    e
+                                                                ) => {
+                                                                    e.stopPropagation();
+
+                                                                    handleEdit(
+                                                                        paquete.id
+                                                                    );
+                                                                }}
+                                                            >
+                                                                <i className="fas fa-pencil-alt"></i>
+                                                            </button>
+
+                                                            <button
+                                                                className="btn btn-success btn-sm"
+                                                                onClick={(
+                                                                    e
+                                                                ) => {
+                                                                    e.stopPropagation();
+
+                                                                    handleDelete(
+                                                                        paquete.id
+                                                                    );
+                                                                }}
+                                                            >
+                                                                <i className="fas fa-trash-alt"></i>
+                                                            </button>
+
+                                                        </td>
+
+                                                    </tr>
+                                                )
+                                            )
                                         ) : (
                                             <tr>
+
                                                 <td
-                                                    colSpan="10"
+                                                    colSpan="13"
                                                     className="text-center text-muted"
                                                 >
                                                     No se encontraron
                                                     resultados.
                                                 </td>
+
                                             </tr>
                                         )}
+
                                     </tbody>
+
                                 </table>
                             )}
+
                         </div>
-                        <div
-                            className="d-flex justify-content-center align-items-center mt-3 text-secondary"
-                            style={{ fontSize: "0.75rem" }}
-                        >
-                            {/* Paginación */}
-                            <nav aria-label="Page navigation example">
-                                <ul className="pagination mb-0">
-                                    <li className="page-item">
-                                        <button
-                                            className="page-link"
-                                            aria-label="Previous"
-                                            onClick={() =>
-                                                setCurrentPage(currentPage - 1)
-                                            }
-                                            disabled={currentPage === 1}
-                                        >
-                                            <i className="fas fa-chevron-left" />
-                                        </button>
-                                    </li>
-                                    {pageNumbers.map((number) => (
-                                        <li
-                                            key={number}
-                                            className={`page-item ${
-                                                number === currentPage
-                                                    ? "active"
-                                                    : ""
-                                            }`}
-                                        >
-                                            <button
-                                                className="page-link"
-                                                onClick={() => paginate(number)}
+
+                        {/* PAGINACIÓN */}
+
+                        {!loading &&
+                            paquetesFiltrados.length >
+                                0 && (
+                                <div
+                                    className="d-flex justify-content-center align-items-center mt-3 text-secondary"
+                                    style={{
+                                        fontSize:
+                                            "0.75rem",
+                                    }}
+                                >
+
+                                    <nav>
+                                        <ul className="pagination mb-0">
+
+                                            {/* ANTERIOR */}
+
+                                            <li
+                                                className={`page-item ${
+                                                    currentPage ===
+                                                    1
+                                                        ? "disabled"
+                                                        : ""
+                                                }`}
                                             >
-                                                {number}
-                                            </button>
-                                        </li>
-                                    ))}
-                                    <li className="page-item">
-                                        <button
-                                            className="page-link"
-                                            aria-label="Next"
-                                            onClick={() =>
-                                                setCurrentPage(currentPage + 1)
-                                            }
-                                            disabled={
-                                                currentPage ===
-                                                pageNumbers.length
-                                            }
-                                        >
-                                            <i className="fas fa-chevron-right" />
-                                        </button>
-                                    </li>
-                                </ul>
-                            </nav>
-                        </div>
+
+                                                <button
+                                                    className="page-link"
+                                                    aria-label="Previous"
+                                                    onClick={() =>
+                                                        paginate(
+                                                            currentPage -
+                                                                1
+                                                        )
+                                                    }
+                                                    disabled={
+                                                        currentPage ===
+                                                        1
+                                                    }
+                                                >
+                                                    <i className="fas fa-chevron-left" />
+                                                </button>
+
+                                            </li>
+
+                                            {/* NÚMEROS */}
+
+                                            {pageNumbers.map(
+                                                (
+                                                    number
+                                                ) => (
+                                                    <li
+                                                        key={
+                                                            number
+                                                        }
+                                                        className={`page-item ${
+                                                            number ===
+                                                            currentPage
+                                                                ? "active"
+                                                                : ""
+                                                        }`}
+                                                    >
+
+                                                        <button
+                                                            className="page-link"
+                                                            onClick={() =>
+                                                                paginate(
+                                                                    number
+                                                                )
+                                                            }
+                                                        >
+                                                            {
+                                                                number
+                                                            }
+                                                        </button>
+
+                                                    </li>
+                                                )
+                                            )}
+
+                                            {/* SIGUIENTE */}
+
+                                            <li
+                                                className={`page-item ${
+                                                    currentPage ===
+                                                    totalPages
+                                                        ? "disabled"
+                                                        : ""
+                                                }`}
+                                            >
+
+                                                <button
+                                                    className="page-link"
+                                                    aria-label="Next"
+                                                    onClick={() =>
+                                                        paginate(
+                                                            currentPage +
+                                                                1
+                                                        )
+                                                    }
+                                                    disabled={
+                                                        currentPage ===
+                                                        totalPages
+                                                    }
+                                                >
+                                                    <i className="fas fa-chevron-right" />
+                                                </button>
+
+                                            </li>
+
+                                        </ul>
+                                    </nav>
+
+                                </div>
+                            )}
+
+                        {/* INFORMACIÓN DE RESULTADOS */}
+
+                        {!loading &&
+                            paquetesFiltrados.length >
+                                0 && (
+                                <div className="text-center text-muted mt-2">
+
+                                    Mostrando{" "}
+                                    {indexOfFirstPackage +
+                                        1}{" "}
+                                    -{" "}
+                                    {Math.min(
+                                        indexOfLastPackage,
+                                        paquetesFiltrados.length
+                                    )}{" "}
+                                    de{" "}
+                                    {
+                                        paquetesFiltrados.length
+                                    }{" "}
+                                    paquetes
+
+                                </div>
+                            )}
+
                     </div>
                 </div>
-                {/* container */}
             </div>
         </div>
     );
