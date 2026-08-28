@@ -23,22 +23,187 @@ class PaqueteTuristicoController extends Controller
     // Obtener todos los paquetes turísticos paginados
     public function index(Request $request)
     {
-        $page = $request->input('page', 0); // React comienza en 0
-        $size = $request->input('size', 4); // Tamaño por página
+        $query = PaqueteTuristico::query();
 
-        $laravelPage = $page + 1;
+        // =========================================================
+        // FILTRO POR CATEGORÍA
+        // =========================================================
 
-        $paquetes = PaqueteTuristico::orderBy('id', 'asc')
-            ->paginate($size, ['*'], 'page', $laravelPage);
+        if (
+            $request->filled('tipo_viaje') &&
+            $request->tipo_viaje !== 'todas'
+        ) {
+            $query->where(
+                'tipo_viaje',
+                $request->tipo_viaje
+            );
+        }
+
+        // =========================================================
+        // FILTRO POR OFERTA
+        // =========================================================
+
+        if ($request->filled('oferta')) {
+
+            if ($request->oferta === 'sin_oferta') {
+
+                // Solo paquetes sin oferta
+                $query->whereNull('oferta');
+            } elseif ($request->oferta !== 'todas') {
+
+                // Solo la oferta seleccionada
+                $query->where(
+                    'oferta',
+                    $request->oferta
+                );
+            }
+        }
+
+        // =========================================================
+        // FILTRAR BLACK FRIDAY SEGÚN SUS FECHAS
+        // =========================================================
+        //
+        // Si es Black Friday:
+        //
+        //   ahora >= oferta_inicio
+        //   Y
+        //   ahora <= oferta_fin
+        //
+        // Los demás paquetes siguen apareciendo normalmente.
+        //
+        // =========================================================
+
+        $ahora = now();
+
+        $query->where(function ($q) use ($ahora) {
+
+            // Paquetes que NO son Black Friday
+            $q->where(function ($subQuery) {
+                $subQuery->whereNull('oferta')
+                    ->orWhere('oferta', '!=', 'black_friday');
+            })
+
+                // O Black Friday que esté actualmente activo
+                ->orWhere(function ($subQuery) use ($ahora) {
+                    $subQuery
+                        ->where('oferta', 'black_friday')
+                        ->whereNotNull('oferta_inicio')
+                        ->whereNotNull('oferta_fin')
+                        ->where('oferta_inicio', '<=', $ahora)
+                        ->where('oferta_fin', '>=', $ahora);
+                });
+        });
+
+        // =========================================================
+        // PLAZAS
+        // =========================================================
+        //
+        // Paquetes normales:
+        //     plazas > 0
+        //
+        // Black Friday:
+        //     también puede aparecer agotado para mostrar SOLD OUT
+        //
+        // =========================================================
+
+        $query->where(function ($q) {
+
+            $q->where('plazas', '>', 0)
+
+                ->orWhere(function ($subQuery) {
+
+                    $subQuery
+                        ->where('oferta', 'black_friday')
+                        ->where('plazas', '<=', 0);
+                });
+        });
+
+        // =========================================================
+        // PAGINACIÓN
+        // =========================================================
+
+        $paquetes = $query->paginate(
+            $request->get('size', 6),
+            ['*'],
+            'page',
+            $request->get('page', 0) + 1
+        );
 
         return response()->json([
             'content' => $paquetes->items(),
             'totalPages' => $paquetes->lastPage(),
-            'currentPage' => $paquetes->currentPage(),
-            'totalItems' => $paquetes->total(),
+            'totalElements' => $paquetes->total(),
+            'currentPage' => $paquetes->currentPage() - 1,
         ]);
     }
 
+
+    public function indexAdmin(Request $request)
+    {
+        try {
+            $size = (int) $request->get('size', 10);
+
+            // Evitar tamaños inválidos o excesivamente grandes
+            if ($size < 1) {
+                $size = 10;
+            }
+
+            if ($size > 100) {
+                $size = 100;
+            }
+
+            $page = (int) $request->get('page', 0);
+
+            if ($page < 0) {
+                $page = 0;
+            }
+
+            /*
+        |--------------------------------------------------------------------------
+        | TODOS LOS PAQUETES
+        |--------------------------------------------------------------------------
+        |
+        | IMPORTANTE:
+        | Aquí NO aplicamos:
+        |
+        | - tipo_viaje
+        | - oferta
+        | - Black Friday
+        | - plazas
+        |
+        */
+
+            $paquetes = PaqueteTuristico::orderBy('id', 'desc')
+                ->paginate(
+                    $size,
+                    ['*'],
+                    'page',
+                    $page + 1
+                );
+
+            return response()->json([
+                'content' => $paquetes->items(),
+                'totalPages' => $paquetes->lastPage(),
+                'totalElements' => $paquetes->total(),
+                'currentPage' => $paquetes->currentPage() - 1,
+            ]);
+        } catch (\Exception $e) {
+
+            Log::error(
+                'Error al obtener los paquetes para administración: ' .
+                    $e->getMessage(),
+                [
+                    'trace' => $e->getTraceAsString(),
+                    'request' => $request->all(),
+                ]
+            );
+
+            return response()->json([
+                'message' => 'Error al obtener los paquetes',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
 
     // Obtener un solo paquete por ID (opcional)
     public function show($id)
@@ -107,6 +272,9 @@ class PaqueteTuristicoController extends Controller
                 'descripcion' => 'nullable|string',
                 'plazas' => 'required|integer',
                 'foto' => 'nullable|image|max:2048', // max 2MB
+                'oferta' => 'nullable|in:navidad,verano,san_valentin,black_friday,cyber_monday,bajada_precio',
+                'oferta_inicio' => 'nullable|date|required_with:oferta',
+                'oferta_fin' => 'nullable|date|after:oferta_inicio|required_with:oferta',
             ]);
 
             // Actualizar campos
@@ -115,8 +283,17 @@ class PaqueteTuristicoController extends Controller
             $paquete->fecha_fin = $request->fecha_fin;
             $paquete->precio = $request->precio;
             $paquete->tipo_viaje = $request->tipo_viaje;
+            $paquete->oferta = $request->oferta ?: null;
             $paquete->descripcion = $request->descripcion;
             $paquete->plazas = $request->plazas;
+            $paquete->oferta_inicio = $request->oferta
+                ? $request->oferta_inicio
+                : null;
+
+            $paquete->oferta_fin = $request->oferta
+                ? $request->oferta_fin
+                : null;
+
 
             // Procesar imagen nueva si existe
             if ($request->hasFile('foto')) {
@@ -193,16 +370,25 @@ class PaqueteTuristicoController extends Controller
             'fecha_fin' => 'required|date|after_or_equal:fecha_inicio',
             'precio' => 'required|numeric|min:0',
             'tipo_viaje' => 'required|string|max:255',
+
+            // OFERTA / CAMPAÑA
+            'oferta' => 'nullable|in:navidad,verano,san_valentin,black_friday,cyber_monday,bajada_precio',
+            'oferta_inicio' => 'nullable|date|required_with:oferta',
+            'oferta_fin' => 'nullable|date|after:oferta_inicio|required_with:oferta',
+
             'descripcion' => 'required|string',
             'plazas' => 'required|integer|min:1',
             'viajerosFijos' => 'nullable|integer|min:1|max:255',
-            'foto' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'foto' => 'required|image|mimes:jpeg,png,jpg,gif|max:10240',
+            'galeria.*' => 'required|image|mimes:jpeg,png,jpg,gif|max:10240',
             'galeria' => 'required|array|size:6',
-            'galeria.*' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048',
+
             'servicios_incluidos' => 'array',
             'servicios_incluidos.*' => 'string',
+
             'servicios_no_incluidos' => 'array',
             'servicios_no_incluidos.*' => 'string',
+
             'puntos_mapa' => 'required|array|min:1',
             'puntos_mapa.*.latitud' => 'required|numeric|between:-90,90',
             'puntos_mapa.*.longitud' => 'required|numeric|between:-180,180',
@@ -217,7 +403,9 @@ class PaqueteTuristicoController extends Controller
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
+            return response()->json([
+                'errors' => $validator->errors()
+            ], 422);
         }
 
         try {
@@ -227,6 +415,12 @@ class PaqueteTuristicoController extends Controller
                 'fecha_fin' => $request->fecha_fin,
                 'precio' => $request->precio,
                 'tipo_viaje' => $request->tipo_viaje,
+
+                // OFERTA
+                'oferta' => $request->oferta ?: null,
+                'oferta_inicio' => $request->oferta ? $request->oferta_inicio : null,
+                'oferta_fin' => $request->oferta ? $request->oferta_fin : null,
+
                 'descripcion' => $request->descripcion,
                 'plazas' => $request->plazas,
                 'viajerosFijos' => $request->viajerosFijos,
@@ -252,8 +446,12 @@ class PaqueteTuristicoController extends Controller
                 $file->storeAs($folderPath, $filename);
 
                 // Después de guardar: dar permisos correctos
-                $fullFilePath = storage_path('app/' . $folderPath . '/' . $filename);
-                @chmod($fullFilePath, 0644); // IMPORTANTE
+                $fullFilePath = storage_path(
+                    'app/' . $folderPath . '/' . $filename
+                );
+
+                @chmod($fullFilePath, 0644);
+
                 $paquete->foto = $filename;
                 $paquete->save();
             }
@@ -261,27 +459,51 @@ class PaqueteTuristicoController extends Controller
             // Guardar galería
             if ($request->hasFile('galeria')) {
                 $galeriaFiles = $request->file('galeria');
-                $galeriaFolder = 'paquetes/' . $paquete->id . '/images'; // ruta relativa al disco "public"
+
+                $galeriaFolder = 'paquetes/' . $paquete->id . '/images';
 
                 // Crear carpeta si no existe
                 if (!Storage::disk('public')->exists($galeriaFolder)) {
                     Storage::disk('public')->makeDirectory($galeriaFolder);
 
-                    // Forzar permisos de carpeta
-                    chmod(storage_path('app/public/' . $galeriaFolder), 0777);
+                    chmod(
+                        storage_path('app/public/' . $galeriaFolder),
+                        0777
+                    );
                 }
 
                 foreach ($request->file('galeria') as $index => $img) {
-                    $imageName = ($index + 1) . '_' . uniqid() . '.' . $img->getClientOriginalExtension();
+                    $imageName =
+                        ($index + 1) .
+                        '_' .
+                        uniqid() .
+                        '.' .
+                        $img->getClientOriginalExtension();
 
-                    // Guardar archivo usando Storage::disk('public')
-                    Storage::disk('public')->putFileAs($galeriaFolder, $img, $imageName);
+                    // Guardar archivo
+                    Storage::disk('public')->putFileAs(
+                        $galeriaFolder,
+                        $img,
+                        $imageName
+                    );
 
-                    // Forzar permisos de archivo
-                    chmod(storage_path('app/public/' . $galeriaFolder . '/' . $imageName), 0777);
+                    // Forzar permisos
+                    chmod(
+                        storage_path(
+                            'app/public/' .
+                                $galeriaFolder .
+                                '/' .
+                                $imageName
+                        ),
+                        0777
+                    );
 
                     // Guardar en BD la ruta pública
-                    $publicUrl = '/storage/' . $galeriaFolder . '/' . $imageName;
+                    $publicUrl =
+                        '/storage/' .
+                        $galeriaFolder .
+                        '/' .
+                        $imageName;
 
                     GaleriaPaquete::create([
                         'paquete_id' => $paquete->id,
@@ -289,7 +511,6 @@ class PaqueteTuristicoController extends Controller
                     ]);
                 }
             }
-
 
             // Guardar servicios incluidos
             if ($request->has('servicios_incluidos')) {
@@ -339,7 +560,15 @@ class PaqueteTuristicoController extends Controller
                 'paquete' => $paquete,
             ], 201);
         } catch (\Exception $e) {
-            Log::error('Error al crear paquete: ' . $e->getMessage() . ' en ' . $e->getFile() . ' línea ' . $e->getLine());
+            Log::error(
+                'Error al crear paquete: ' .
+                    $e->getMessage() .
+                    ' en ' .
+                    $e->getFile() .
+                    ' línea ' .
+                    $e->getLine()
+            );
+
             return response()->json([
                 'message' => 'Error al crear el paquete',
                 'error' => $e->getMessage(),
@@ -378,6 +607,11 @@ class PaqueteTuristicoController extends Controller
                 'foto' => $paquete->foto,
                 'plazas' => $paquete->plazas,
 
+                // OFERTA
+                'oferta' => $paquete->oferta,
+                'oferta_inicio' => $paquete->oferta_inicio,
+                'oferta_fin' => $paquete->oferta_fin,
+
                 // Relacionados correctamente como arrays de objetos
                 'servicios_incluidos' => $paquete->serviciosIncluidos->map(fn($s) => [
                     'id' => $s->id,
@@ -403,6 +637,7 @@ class PaqueteTuristicoController extends Controller
                     'dia' => $i->dia,
                     'descripcion' => $i->descripcion,
                 ]),
+
             ];
 
             Log::info("Respuesta del paquete formateada correctamente", ['paquete_id' => $paquete->id]);

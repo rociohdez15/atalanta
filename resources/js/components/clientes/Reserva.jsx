@@ -85,6 +85,8 @@ const Reserva = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [dniBloqueados, setDniBloqueados] = useState({});
     const [validandoDni, setValidandoDni] = useState({});
+    // NUEVO: aceptación de condiciones especiales Black Friday 24h
+    const [aceptaCondicionesBF, setAceptaCondicionesBF] = useState(false);
 
     const handleChange = (index, e) => {
         const { name, value } = e.target;
@@ -292,6 +294,17 @@ const Reserva = () => {
         // 🔥 ACTIVA SPINNER AL INICIO
         setIsSubmitting(true);
 
+        // --- Validación condiciones especiales Black Friday 24h ---
+        if (paquete?.oferta === "black_friday" && !aceptaCondicionesBF) {
+            Swal.fire({
+                icon: "warning",
+                title: "Condiciones no aceptadas",
+                text: "Debes leer y aceptar las Condiciones Especiales de la Compra Black Friday 24h antes de continuar.",
+            });
+            setIsSubmitting(false);
+            return;
+        }
+
         // --- Validación campos vacíos ---
         const camposVacios = participantes.some((p) =>
             Object.values(p).some((v) => v.trim() === ""),
@@ -389,8 +402,14 @@ const Reserva = () => {
             await axios.post(
                 "/api/registro/reserva/temp",
                 {
-                    paqueteId: parseInt(paqueteId), // ← añadir esto, viene de useParams() como string
+                    paqueteId: parseInt(paqueteId),
                     participantes,
+
+                    // Black Friday
+                    acepta_condiciones_black_friday:
+                        paquete?.oferta === "black_friday"
+                            ? aceptaCondicionesBF
+                            : false,
                 },
                 { withCredentials: true },
             );
@@ -1303,6 +1322,73 @@ const Reserva = () => {
                                         .
                                     </div>
 
+                                    {/* NUEVO: Condiciones especiales Black Friday 24h */}
+                                    {paquete?.oferta === "black_friday" && (
+                                        <div
+                                            className="mt-3 mb-3 p-3 rounded"
+                                            style={{
+                                                backgroundColor:
+                                                    "rgba(255,255,255,0.1)",
+                                                border: "1px solid rgba(255,255,255,0.3)",
+                                                fontFamily: "Inter, sans-serif",
+                                            }}
+                                        >
+                                            <div className="form-check">
+                                                <input
+                                                    className="form-check-input"
+                                                    type="checkbox"
+                                                    id={`aceptaCondicionesBF-${paqueteId}`}
+                                                    checked={
+                                                        aceptaCondicionesBF
+                                                    }
+                                                    onChange={(e) =>
+                                                        setAceptaCondicionesBF(
+                                                            e.target.checked,
+                                                        )
+                                                    }
+                                                    required
+                                                />
+
+                                                <label
+                                                    className="form-check-label"
+                                                    htmlFor={`aceptaCondicionesBF-${paqueteId}`}
+                                                    style={{
+                                                        color: "#000000",
+                                                        fontSize: "12px",
+                                                    }}
+                                                >
+                                                    He leído y acepto las{" "}
+                                                    <strong>
+                                                        Condiciones Especiales
+                                                        de la Compra Black
+                                                        Friday 24h
+                                                    </strong>{" "}
+                                                    (Tarifas No
+                                                    Reembolsable/Reembolsable
+                                                    según oferta y Confirmación
+                                                    en 24h).
+                                                </label>
+                                            </div>
+
+                                            <a
+                                                href="/documents/clausula_condiciones_bf_atalanta.pdf"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                style={{
+                                                    color: "#493f2f",
+                                                    textDecoration: "underline",
+                                                    fontSize: "12px",
+                                                    display: "inline-block",
+                                                    marginTop: "0.5rem",
+                                                }}
+                                            >
+                                                📄 Descargar Condiciones
+                                                Especiales Black Friday 24h
+                                                (PDF)
+                                            </a>
+                                        </div>
+                                    )}
+
                                     <br />
 
                                     {/* Botón */}
@@ -1318,8 +1404,18 @@ const Reserva = () => {
                                         <button
                                             type="button"
                                             className="btn px-4 py-2"
+                                            disabled={
+                                                paquete?.oferta ===
+                                                    "black_friday" &&
+                                                !aceptaCondicionesBF
+                                            }
                                             style={{
-                                                backgroundColor: "#000000", // gris cuando bloqueado
+                                                backgroundColor:
+                                                    paquete?.oferta ===
+                                                        "black_friday" &&
+                                                    !aceptaCondicionesBF
+                                                        ? "#555555"
+                                                        : "#000000",
                                                 backdropFilter: "blur(12px)",
                                                 WebkitBackdropFilter:
                                                     "blur(12px)",
@@ -1330,6 +1426,12 @@ const Reserva = () => {
                                                 fontSize: "12px",
                                                 transition: "all 0.3s ease",
                                                 fontFamily: "Inter, sans-serif",
+                                                cursor:
+                                                    paquete?.oferta ===
+                                                        "black_friday" &&
+                                                    !aceptaCondicionesBF
+                                                        ? "not-allowed"
+                                                        : "pointer",
                                             }}
                                             onClick={handleIrAPago}
                                         >

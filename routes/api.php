@@ -130,6 +130,7 @@ Route::prefix('imagenes')->middleware('admin')->group(function () {
 Route::get('/paquetes/ultimos', [PaqueteTuristicoController::class, 'ultimos']);
 Route::get('/paquetes/buscar', [PaqueteTuristicoController::class, 'buscar'])->middleware('admin');
 Route::get('/paquetes', [PaqueteTuristicoController::class, 'index']);
+Route::get('/paquetes/admin', [PaqueteTuristicoController::class, 'indexAdmin']);
 Route::get('/paquetes/{id}', [PaqueteTuristicoController::class, 'show']);
 Route::get('/paquetes/{id}/imagenes', [PaqueteTuristicoController::class, 'imagenes']);
 Route::get('/paquetes/{id}/puntos', [PaqueteTuristicoController::class, 'getByPaquete']);

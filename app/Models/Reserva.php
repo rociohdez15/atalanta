@@ -27,7 +27,9 @@ class Reserva extends Model
         'importe_cuotas',
         'stripe_session_id',
         'destino',
-        'vouchers_hotel'
+        'vouchers_hotel',
+        'acepta_condiciones_black_friday',
+        'condiciones_black_friday_aceptadas_at',
     ];
 
     protected $casts = [
@@ -36,6 +38,8 @@ class Reserva extends Model
         'fecha_inicio' => 'date',
         'fecha_fin' => 'date',
         'vouchers_hotel' => 'array',
+        'acepta_condiciones_black_friday' => 'boolean',
+        'condiciones_black_friday_aceptadas_at' => 'datetime',
     ];
 
     public function cliente()

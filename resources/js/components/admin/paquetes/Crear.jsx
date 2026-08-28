@@ -2,6 +2,16 @@ import React, { useState } from "react";
 import axios from "axios";
 import Swal from "sweetalert2";
 
+const ofertas = [
+    { key: "", label: "Sin oferta" },
+    { key: "navidad", label: "Navidad" },
+    { key: "verano", label: "Verano" },
+    { key: "san_valentin", label: "San Valentín" },
+    { key: "black_friday", label: "Black Friday" },
+    { key: "cyber_monday", label: "Cyber Monday" },
+    { key: "bajada_precio", label: "Bajada de precio" },
+];
+
 const CrearPaquete = () => {
     const [nombre, setNombre] = useState("");
     const [lugar, setLugar] = useState("");
@@ -9,6 +19,9 @@ const CrearPaquete = () => {
     const [fechaFin, setFechaFin] = useState("");
     const [precio, setPrecio] = useState("");
     const [tipoViaje, setTipoViaje] = useState("");
+    const [oferta, setOferta] = useState("");
+    const [ofertaInicio, setOfertaInicio] = useState("");
+    const [ofertaFin, setOfertaFin] = useState("");
     const [descripcion, setDescripcion] = useState("");
     const [foto, setFoto] = useState(null);
     const [previewFotos, setPreviewFotos] = useState([]);
@@ -307,6 +320,9 @@ const CrearPaquete = () => {
         formData.append("fecha_fin", fechaFin);
         formData.append("precio", precio);
         formData.append("tipo_viaje", tipoViaje);
+        formData.append("oferta", oferta);
+        formData.append("oferta_inicio", ofertaInicio);
+        formData.append("oferta_fin", ofertaFin);
         formData.append("descripcion", descripcion);
         formData.append("plazas", plazas);
         formData.append("foto", foto);
@@ -378,6 +394,9 @@ const CrearPaquete = () => {
                 setFechaFin("");
                 setPrecio("");
                 setTipoViaje("");
+                setOferta("");
+                setOfertaInicio("");
+                setOfertaFin("");
                 setDescripcion("");
                 setFoto(null);
                 setPreviewFotos([]);
@@ -547,6 +566,78 @@ const CrearPaquete = () => {
                                     required
                                 />
                             </div>
+
+                            {/* OFERTA / CAMPAÑA */}
+                            <div className="mb-3">
+                                <label htmlFor="oferta" className="form-label">
+                                    Oferta / Campaña
+                                </label>
+
+                                <select
+                                    id="oferta"
+                                    className="form-select"
+                                    value={oferta}
+                                    onChange={(e) => setOferta(e.target.value)}
+                                    style={{
+                                        height: "42px",
+                                        minHeight: "42px",
+                                        lineHeight: "1.5",
+                                        paddingTop: "0.375rem",
+                                        paddingBottom: "0.375rem",
+                                        overflow: "visible",
+                                    }}
+                                >
+                                    {ofertas.map(({ key, label }) => (
+                                        <option key={key} value={key}>
+                                            {label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {oferta && (
+                                <div className="row">
+                                    <div className="col-md-6 mb-3">
+                                        <label
+                                            htmlFor="ofertaInicio"
+                                            className="form-label"
+                                        >
+                                            Inicio de la oferta
+                                        </label>
+
+                                        <input
+                                            type="datetime-local"
+                                            id="ofertaInicio"
+                                            className="form-control"
+                                            value={ofertaInicio}
+                                            onChange={(e) =>
+                                                setOfertaInicio(e.target.value)
+                                            }
+                                            required
+                                        />
+                                    </div>
+
+                                    <div className="col-md-6 mb-3">
+                                        <label
+                                            htmlFor="ofertaFin"
+                                            className="form-label"
+                                        >
+                                            Fin de la oferta
+                                        </label>
+
+                                        <input
+                                            type="datetime-local"
+                                            id="ofertaFin"
+                                            className="form-control"
+                                            value={ofertaFin}
+                                            onChange={(e) =>
+                                                setOfertaFin(e.target.value)
+                                            }
+                                            required
+                                        />
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="mb-3">
                                 <label

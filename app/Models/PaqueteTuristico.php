@@ -34,7 +34,10 @@ class PaqueteTuristico extends Model
         'incluye',
         'no_incluye',
         'preguntas_frecuentes',
-        'viajerosFijos'
+        'viajerosFijos',
+        'oferta',
+        'oferta_inicio',
+        'oferta_fin',
     ];
 
     public function itinerario()

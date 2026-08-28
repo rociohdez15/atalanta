@@ -35,6 +35,8 @@
   <link rel="preload" as="image" href="/images/fondo2.jpg" fetchpriority="high" />
   <link rel="preload" as="image" href="/images/fondoo3.jpg" fetchpriority="high" />
   <link rel="preload" as="image" href="/images/fondo4.jpg" fetchpriority="high" />
+  <link rel="preload" as="image" href="/images/campanas/fondo_bf.png" fetchpriority="high" />
+  <link rel="preload" as="image" href="/images/campanas/fondo_bfm.png" fetchpriority="high" media="(max-width: 768px)" />
 
   <!-- Preload fuentes -->
   <link rel="preload" as="font" href="https://cdn.jsdelivr.net/npm/remixicon@2.5.0/fonts/remixicon.woff2?v=2.5.0" type="font/woff2" crossorigin>
