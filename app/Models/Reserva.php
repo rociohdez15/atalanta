@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\IncluyePersonalizados;
 
 class Reserva extends Model
 {
@@ -82,6 +83,11 @@ class Reserva extends Model
     public function cuotas()
     {
         return $this->hasMany(Cuota::class);
+    }
+
+    public function incluye_personalizados()
+    {
+        return $this->hasMany(IncluyePersonalizados::class, 'reserva_id');
     }
 
 

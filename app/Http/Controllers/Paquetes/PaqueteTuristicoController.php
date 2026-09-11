@@ -269,9 +269,15 @@ class PaqueteTuristicoController extends Controller
                 'fecha_fin' => 'required|date',
                 'precio' => 'required|numeric',
                 'tipo_viaje' => 'required|string',
+
+                // ESTADO
+                'estado' => 'required|in:proximamente,disponible',
+
                 'descripcion' => 'nullable|string',
                 'plazas' => 'required|integer',
-                'foto' => 'nullable|image|max:2048', // max 2MB
+                'foto' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:10240',
+
+                // OFERTA
                 'oferta' => 'nullable|in:navidad,verano,san_valentin,black_friday,cyber_monday,bajada_precio',
                 'oferta_inicio' => 'nullable|date|required_with:oferta',
                 'oferta_fin' => 'nullable|date|after:oferta_inicio|required_with:oferta',
@@ -283,9 +289,16 @@ class PaqueteTuristicoController extends Controller
             $paquete->fecha_fin = $request->fecha_fin;
             $paquete->precio = $request->precio;
             $paquete->tipo_viaje = $request->tipo_viaje;
+
+            // ESTADO
+            $paquete->estado = $request->estado;
+
+            // OFERTA
             $paquete->oferta = $request->oferta ?: null;
+
             $paquete->descripcion = $request->descripcion;
             $paquete->plazas = $request->plazas;
+
             $paquete->oferta_inicio = $request->oferta
                 ? $request->oferta_inicio
                 : null;
@@ -294,40 +307,53 @@ class PaqueteTuristicoController extends Controller
                 ? $request->oferta_fin
                 : null;
 
-
             // Procesar imagen nueva si existe
             if ($request->hasFile('foto')) {
+
                 if ($paquete->foto) {
-                    $rutaAnterior = "public/paquetes/portada/{$paquete->id}/{$paquete->foto}";
+                    $rutaAnterior =
+                        "public/paquetes/portada/{$paquete->id}/{$paquete->foto}";
+
                     if (Storage::exists($rutaAnterior)) {
                         Storage::delete($rutaAnterior);
                     }
                 }
 
                 $imagen = $request->file('foto');
-                $nombreImagen = Str::random(20) . '.' . $imagen->getClientOriginalExtension();
 
-                $imagen->storeAs("public/paquetes/portada/{$paquete->id}", $nombreImagen);
+                $nombreImagen =
+                    Str::random(20) .
+                    '.' .
+                    $imagen->getClientOriginalExtension();
+
+                $imagen->storeAs(
+                    "public/paquetes/portada/{$paquete->id}",
+                    $nombreImagen
+                );
 
                 $paquete->foto = $nombreImagen;
             }
 
             $paquete->save();
 
-            return response()->json($paquete);
+            return response()->json([
+                'message' => 'Paquete actualizado correctamente',
+                'paquete' => $paquete,
+            ], 200);
         } catch (ValidationException $e) {
+
             return response()->json([
                 'message' => 'Error de validación',
                 'errors' => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
+
             return response()->json([
                 'message' => 'Error inesperado',
                 'error' => $e->getMessage(),
             ], 500);
         }
     }
-
     // Eliminar paquete
     public function destroy($id)
     {
@@ -370,6 +396,9 @@ class PaqueteTuristicoController extends Controller
             'fecha_fin' => 'required|date|after_or_equal:fecha_inicio',
             'precio' => 'required|numeric|min:0',
             'tipo_viaje' => 'required|string|max:255',
+
+            // ESTADO DEL PAQUETE
+            'estado' => 'required|in:proximamente,disponible',
 
             // OFERTA / CAMPAÑA
             'oferta' => 'nullable|in:navidad,verano,san_valentin,black_friday,cyber_monday,bajada_precio',
@@ -416,10 +445,17 @@ class PaqueteTuristicoController extends Controller
                 'precio' => $request->precio,
                 'tipo_viaje' => $request->tipo_viaje,
 
+                // ESTADO
+                'estado' => $request->estado,
+
                 // OFERTA
                 'oferta' => $request->oferta ?: null,
-                'oferta_inicio' => $request->oferta ? $request->oferta_inicio : null,
-                'oferta_fin' => $request->oferta ? $request->oferta_fin : null,
+                'oferta_inicio' => $request->oferta
+                    ? $request->oferta_inicio
+                    : null,
+                'oferta_fin' => $request->oferta
+                    ? $request->oferta_fin
+                    : null,
 
                 'descripcion' => $request->descripcion,
                 'plazas' => $request->plazas,
@@ -437,17 +473,27 @@ class PaqueteTuristicoController extends Controller
                 // Crear carpeta con permisos
                 if (!Storage::exists($folderPath)) {
                     Storage::makeDirectory($folderPath, 0775, true);
-                    @chmod(storage_path('app/' . $folderPath), 0775);
+
+                    @chmod(
+                        storage_path('app/' . $folderPath),
+                        0775
+                    );
                 }
 
-                $filename = uniqid() . '.' . $file->getClientOriginalExtension();
+                $filename =
+                    uniqid() .
+                    '.' .
+                    $file->getClientOriginalExtension();
 
                 // Guardar archivo
                 $file->storeAs($folderPath, $filename);
 
                 // Después de guardar: dar permisos correctos
                 $fullFilePath = storage_path(
-                    'app/' . $folderPath . '/' . $filename
+                    'app/' .
+                        $folderPath .
+                        '/' .
+                        $filename
                 );
 
                 @chmod($fullFilePath, 0644);
@@ -460,19 +506,26 @@ class PaqueteTuristicoController extends Controller
             if ($request->hasFile('galeria')) {
                 $galeriaFiles = $request->file('galeria');
 
-                $galeriaFolder = 'paquetes/' . $paquete->id . '/images';
+                $galeriaFolder =
+                    'paquetes/' .
+                    $paquete->id .
+                    '/images';
 
                 // Crear carpeta si no existe
                 if (!Storage::disk('public')->exists($galeriaFolder)) {
-                    Storage::disk('public')->makeDirectory($galeriaFolder);
+                    Storage::disk('public')->makeDirectory(
+                        $galeriaFolder
+                    );
 
                     chmod(
-                        storage_path('app/public/' . $galeriaFolder),
+                        storage_path(
+                            'app/public/' . $galeriaFolder
+                        ),
                         0777
                     );
                 }
 
-                foreach ($request->file('galeria') as $index => $img) {
+                foreach ($galeriaFiles as $index => $img) {
                     $imageName =
                         ($index + 1) .
                         '_' .
@@ -514,7 +567,10 @@ class PaqueteTuristicoController extends Controller
 
             // Guardar servicios incluidos
             if ($request->has('servicios_incluidos')) {
-                foreach ($request->servicios_incluidos as $servicio) {
+                foreach (
+                    $request->servicios_incluidos
+                    as $servicio
+                ) {
                     Incluye::create([
                         'paquete_id' => $paquete->id,
                         'descripcion' => $servicio,
@@ -524,7 +580,10 @@ class PaqueteTuristicoController extends Controller
 
             // Guardar servicios no incluidos
             if ($request->has('servicios_no_incluidos')) {
-                foreach ($request->servicios_no_incluidos as $servicio) {
+                foreach (
+                    $request->servicios_no_incluidos
+                    as $servicio
+                ) {
                     NoIncluye::create([
                         'paquete_id' => $paquete->id,
                         'descripcion' => $servicio,

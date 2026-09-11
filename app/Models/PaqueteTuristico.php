@@ -38,6 +38,7 @@ class PaqueteTuristico extends Model
         'oferta',
         'oferta_inicio',
         'oferta_fin',
+        'estado',
     ];
 
     public function itinerario()
