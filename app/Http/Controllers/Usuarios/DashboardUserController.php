@@ -212,241 +212,308 @@ class DashboardUserController extends Controller
         return response()->json(['error' => 'Cliente no encontrado'], 404);
     }
 
-    $reserva = Reserva::with('paquete')->find($reservaId);
+    // Cargar reserva con paquete, participantes, servicios del paquete y servicios personalizados
+    $reserva = Reserva::with([
+        'paquete.incluye',
+        'participantes',
+        'incluye_personalizados',
+    ])->find($reservaId);
+
     if (!$reserva) {
         Log::error("Reserva no encontrada con ID: {$reservaId}");
         return response()->json(['error' => 'Reserva no encontrada'], 404);
     }
 
-    $nombrePaquete = $reserva->paquete ? $reserva->paquete->nombre : 'Paquete no asociado';
+    $paquete = $reserva->paquete;
+    $esPersonalizado = (int) ($reserva->paquete_id ?? 0) === 0;
 
-    // Fechas formateadas
-    $fechaReservaFormatted = $reserva->fecha_reserva ? date('d/m/Y', strtotime($reserva->fecha_reserva)) : 'No disponible';
-    $fechaInicioFormatted = $reserva->paquete && $reserva->paquete->fecha_inicio ? date('d/m/Y', strtotime($reserva->paquete->fecha_inicio)) : null;
-    $fechaFinFormatted = $reserva->paquete && $reserva->paquete->fecha_fin ? date('d/m/Y', strtotime($reserva->paquete->fecha_fin)) : null;
+    $nombrePaquete = $esPersonalizado
+        ? ($reserva->destino ?? 'Destino personalizado')
+        : ($paquete->nombre ?? ($reserva->destino ?? 'Experiencia'));
 
-    $tipoPago = $reserva->metodo_pago ?? 'No disponible';
-    $numCuotas = $reserva->num_cuotas ?? 'N/A';
-    $importeCuotas = $reserva->importe_cuotas ?? 'N/A';
-    $plazas = $reserva->num_personas ?? 'N/A';
+    /*
+    |--------------------------------------------------------------------------
+    | FECHAS
+    |--------------------------------------------------------------------------
+    */
+    $extraerFecha = function ($valor) {
+        if (empty($valor)) {
+            return null;
+        }
+        try {
+            return \Carbon\Carbon::parse($valor);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    };
 
-    $ivaRate = 0.21;
-    $precioTotal = $reserva->total_precio ?? 0;
-    if ($precioTotal > 0) {
-        $baseImponible = round($precioTotal / (1 + $ivaRate), 2);
-        $iva = round($precioTotal - $baseImponible, 2);
-    } else {
-        $baseImponible = 0;
-        $iva = 0;
-    }
+    $fechaReservaCarbon = $extraerFecha($reserva->fecha_reserva);
+    $fechaInicioCarbon  = $extraerFecha($paquete->fecha_inicio ?? $reserva->fecha_inicio ?? null);
+    $fechaFinCarbon     = $extraerFecha($paquete->fecha_fin ?? $reserva->fecha_fin ?? null);
+
+    $fechaReservaFormatted = $fechaReservaCarbon ? $fechaReservaCarbon->format('d/m/Y') : 'No disponible';
+    $fechaInicio           = $fechaInicioCarbon ? $fechaInicioCarbon->format('d-m-Y') : null;
+    $fechaFin              = $fechaFinCarbon ? $fechaFinCarbon->format('d-m-Y') : null;
+    $fechaInicioFormatted  = $fechaInicioCarbon ? $fechaInicioCarbon->format('d/m/Y') : 'No disponible';
+    $fechaFinFormatted     = $fechaFinCarbon ? $fechaFinCarbon->format('d/m/Y') : 'No disponible';
+
+    /*
+    |--------------------------------------------------------------------------
+    | DATOS ECONÓMICOS
+    |--------------------------------------------------------------------------
+    */
+    $tipoPago = strtolower((string) ($reserva->metodo_pago ?? ''));
+    $plazas   = (int) ($reserva->num_personas ?? 0);
+
+    $totalPrecioFloat = (float) ($reserva->total_precio ?? 0);
+    $baseImponible    = $totalPrecioFloat > 0 ? $totalPrecioFloat / 1.21 : 0;
+    $iva              = $totalPrecioFloat - $baseImponible;
 
     $baseImponibleFormatted = number_format($baseImponible, 2, ',', '.');
-    $ivaFormatted = number_format($iva, 2, ',', '.');
-    $totalPrecio = number_format($precioTotal, 2, ',', '.');
+    $ivaFormatted           = number_format($iva, 2, ',', '.');
+    $totalPrecioFormatted   = number_format($totalPrecioFloat, 2, ',', '.');
+    $subtotal               = number_format($totalPrecioFloat, 2, ',', '.');
 
-    $participantes = $reserva->participantes ?? [];
+    $importeAlojamiento = (float) ($reserva->importe_alojamiento ?? 0);
+    $impuestoMunicipal  = (float) ($reserva->impuesto_municipal ?? 0);
 
-    $precioUnitario = $precioTotal; // Para la tabla de conceptos
-    $subtotal = $precioTotal;
+    /*
+    |--------------------------------------------------------------------------
+    | PARTICIPANTES (relación real)
+    |--------------------------------------------------------------------------
+    */
+    $participantes = $reserva->participantes; // Collection de modelos Participante
 
-    $logoPath = public_path('images/logo-factura.png'); // ruta absoluta al logo
-    $logoBase64 = base64_encode(file_get_contents($logoPath));
-    $logoSrc = 'data:image/png;base64,' . $logoBase64;
+    /*
+    |--------------------------------------------------------------------------
+    | SERVICIOS INCLUIDOS (paquete->incluye o incluye_personalizada)
+    |--------------------------------------------------------------------------
+    */
+    $serviciosIncluidos = $esPersonalizado
+        ? $reserva->incluye_personalizados
+        : ($paquete->incluye ?? collect());
 
+    /*
+    |--------------------------------------------------------------------------
+    | LOGO
+    |--------------------------------------------------------------------------
+    */
+    $logoPath = public_path('images/logo_factura_negro.png');
+    if (file_exists($logoPath)) {
+        $logoBase64 = base64_encode(file_get_contents($logoPath));
+        $logoSrc = 'data:image/png;base64,' . $logoBase64;
+    } else {
+        $logoSrc = 'data:image/png;base64,' .
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMB/eeFmjAAAAAASUVORK5CYII=';
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | HTML PDF (mismo diseño que ReservaConfirmacionMail)
+    |--------------------------------------------------------------------------
+    */
     $htmlPdf = "
 <html>
 <head>
-    <style>
-    @page { margin: 10mm 20mm 10mm 10mm; }
-    body { font-family: 'DejaVu Sans', Arial, sans-serif; color: #333; margin:0; padding:0; }
-    h1, h2, h3 { margin:0; padding:0; }
-    ul.participantes { list-style:none; padding-left:0; font-size:14px; }
-    ul.participantes li { padding:5px 0; border-bottom:1px solid #eee; }
-    </style>
+<style>
+@page { margin:10mm 20mm 10mm 10mm; }
+body { font-family:'DejaVu Sans', Arial, sans-serif; color:#333; margin:0; padding:0; }
+h1, h2, h3 { margin:0; padding:0; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th, td { padding:12px; }
+th { background:#000000; color:#fff; }
+</style>
 </head>
 <body>
-    <div style='width:100%; padding:30px;'>
+<div style='padding:30px;'>
 
-        <!-- Header -->
-        <table width='100%' style='border-bottom:4px solid #8a775a; margin-bottom:20px; padding-bottom:10px;'>
+    <table width='100%' style='border-bottom:4px solid #000000; margin-bottom:20px; padding-bottom:10px;'>
+        <tr>
+            <td style='width:30%; vertical-align:middle;'>
+                <img src='{$logoSrc}' alt='Logo Empresa' style='height:100px; border-radius:6px;'>
+            </td>
+            <td style='width:70%; vertical-align:middle; text-align:right;'>
+                <div style='font-size:11px; color:#000000; text-align:right;'>
+                    <strong>Fecha de emisión:</strong><br>" . date('d/m/Y') . "
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <div style='display:table; width:100%; margin-bottom:50px;'>
+        <div style='display:table-cell; width:50%; vertical-align:top; text-align:left;'>
+            <div style='background-color:#f5f5f5; padding:20px; border-radius:10px; border:2px solid #000000;'>
+                <h3 style='color:#000000; font-size:14px; font-weight:bold; margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;'>Datos del emisor</h3>
+                <div style='font-size:13px; line-height:1.3;'>
+                    <p style='margin:0 0 4px 0;'><strong>Atalanta</strong></p>
+                    <p style='margin:0 0 3px 0;'>Dirección: Villanueva de los Castillejos, Huelva, España</p>
+                    <p style='margin:0 0 3px 0;'>Tel: +34 614 892 722</p>
+                    <p style='margin:0 0 3px 0;'>Email: info@viajesatalanta.com</p>
+                    <p style='margin:0 0 6px 0;'>Web: www.viajesatalanta.com</p>
+                </div>
+            </div>
+        </div>
+        <div style='display:table-cell; width:50%; vertical-align:top; text-align:right;'>
+            <div style='background-color:#f5f5f5; padding:20px; border-radius:10px; border:2px solid #000000; display:inline-block; text-align:left;'>
+                <h3 style='color:#000000; font-size:14px; font-weight:bold; margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;'>Datos del cliente</h3>
+                <div style='font-size:13px; line-height:1.3;'>
+                    <p><strong>Nombre: {$cliente->nombre} {$cliente->apellidos}</strong></p>
+                    <p style='margin:0 0 3px 0;'>DNI: {$cliente->dni}</p>
+                    <p style='margin:0 0 3px 0;'>Dirección: {$cliente->direccion}</p>
+                    <p style='margin:0 0 3px 0;'>Tel: {$cliente->telefono}</p>
+                    <p style='margin:0 0 3px 0;'>Email: {$cliente->email}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div style='background-color:#f5f5f5; padding:20px; border-radius:10px; margin-bottom:30px; border:1px solid rgba(138,119,90,0.2);'>
+        <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>Detalles de la experiencia</h3>
+        <table>
             <tr>
-                <td style='width:30%; vertical-align:middle;'><img src='{$logoSrc}' alt='Logo Empresa' style='height:60px; border-radius:6px;'></td>
-                <td style='width:70%; vertical-align:middle; text-align:right;'>
-                    <div style='background-color:#8a775a; color:#fff; padding:5px 15px; border-radius:6px; display:inline-block; margin-bottom:10px;'>
-                        <div style='font-size:10px; opacity:0.9;'>FACTURA Nº</div>
-                        <div style='font-size:18px; font-weight:bold;'>{$reservaId}</div>
-                    </div>
-                    <div style='font-size:11px; color:#8a775a; text-align:right;'><strong>Fecha de emisión:</strong><br>" . date('d/m/Y') . "</div>
+                <td style='width:50%; padding:5px 10px; vertical-align:top;'>
+                    <strong>Experiencia:</strong><br>
+                    <span style='font-size:12px;'><strong>{$nombrePaquete}</strong></span><br><br>
+                    <strong>Fecha de reserva:</strong><br>{$fechaReservaFormatted}<br><br>
+                    <strong>Fecha de entrada:</strong><br>{$fechaInicioFormatted}
+                </td>
+                <td style='width:50%; padding:5px 10px; vertical-align:top;'>
+                    <strong>Fecha de salida:</strong><br>{$fechaFinFormatted}<br><br>
+                    <strong>Número de viajeros:</strong><br>{$plazas}" . ($plazas == 1 ? ' persona' : ' personas') . "
                 </td>
             </tr>
         </table>
+    </div>
 
-        <!-- Datos emisor y cliente -->
-        <div style='display:table; width:100%; margin-bottom:50px; border-spacing:0px 0;'>
-            <div style='display:table-cell; width:50%; vertical-align:top; text-align:left;'>
-                <div style='background-color:#fcf4ef; padding:20px; border-radius:10px; border:2px solid #8a775a;'>
-                    <h3 style='color:#8a775a; font-size:14px; font-weight:bold; margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;'>Datos del emisor</h3>
-                    <div style='font-size:13px; line-height:1.3;'>
-                        <p style='margin:0 0 4px 0;'><strong style='color:#8a775a;'>Atalanta</strong></p>
-                        <p style='margin:0 0 3px 0;'>Dirección: Villanueva de los Castillejos, Huelva, España</p>
-                        <p style='margin:0 0 3px 0;'>Tel: +34 659 633 676</p>
-                        <p style='margin:0 0 3px 0;'>Email: info@viajesatalanta.com</p>
-                        <p style='margin:0 0 6px 0;'>Web: www.viajesatalanta.com</p>
-                        <div style='padding-top:6px; border-top:1px solid rgba(138,119,90,0.2);'>
-                            <p style='margin:0 0 2px 0;'><strong>CIF:</strong> B-12345678</p>
-                            <p style='margin:0;'><strong>Registro Mercantil:</strong> Madrid, Tomo 1234, Folio 56</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div style='display:table-cell; width:50%; vertical-align:top; text-align:right;'>
-                <div style='background-color:#fcf4ef; padding:20px; border-radius:10px; border:2px solid #c16e44; display:inline-block; text-align:left;'>
-                    <h3 style='color:#c16e44; font-size:14px; font-weight:bold; margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;'>Datos del cliente</h3>
-                    <div style='font-size:13px; line-height:1.3;'>
-                        <p style='margin:0 0 4px 0;'><strong style='color:#8a775a;'>{$cliente->nombre} {$cliente->apellidos}</strong></p>
-                        <p style='margin:0 0 3px 0;'>DNI: {$cliente->dni}</p>
-                        <p style='margin:0 0 3px 0;'>Dirección: {$cliente->direccion}</p>
-                        <p style='margin:0 0 3px 0;'>Tel: {$cliente->telefono}</p>
-                        <p style='margin:0;'>Email: {$cliente->email}</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Detalles de la Experiencia -->
-        <div style='background-color:#f8f5f1; padding:20px; border-radius:10px; margin-bottom:30px; border:1px solid rgba(138,119,90,0.2);'>
-            <h3 style='color:#8a775a; font-size:16px; font-weight:bold; margin-bottom:15px;'>Detalles de la experiencia</h3>
-            <table style='width:100%; border-collapse:collapse; font-size:13px;'>
+    <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>Viajeros</h3>
+    <div style='margin-bottom:30px;'>
+        <table>
+            <thead>
+                <tr style='background-color:#000000; color:#ffffff;'>
+                    <th style='padding:12px; text-align:left;'>Nombre</th>
+                    <th style='padding:12px; text-align:left;'>Apellidos</th>
+                    <th style='padding:12px; text-align:center;'>DNI</th>
+                    <th style='padding:12px; text-align:left;'>Email</th>
+                </tr>
+            </thead>
+            <tbody>";
+                if ($participantes && $participantes->count() > 0) {
+                    foreach ($participantes as $p) {
+                        $nombreP    = $p->nombre ?? 'Nombre no disponible';
+                        $apellidosP = $p->apellidos ?? '';
+                        $dni        = $p->dni ?? 'N/A';
+                        $emailP     = $p->email ?? 'Email no disponible';
+                        $htmlPdf .= "
+                <tr style='background-color:#f5f5f5;'>
+                    <td style='padding:12px; border-bottom:1px solid rgba(0,0,0,0.15);'>{$nombreP}</td>
+                    <td style='padding:12px; border-bottom:1px solid rgba(0,0,0,0.15);'>{$apellidosP}</td>
+                    <td style='padding:12px; text-align:center; border-bottom:1px solid rgba(0,0,0,0.15);'>{$dni}</td>
+                    <td style='padding:12px; border-bottom:1px solid rgba(0,0,0,0.15);'>{$emailP}</td>
+                </tr>";
+                    }
+                } else {
+                    $htmlPdf .= "
                 <tr>
-                    <td style='width:50%; padding:5px 10px; vertical-align:top;'>
-                        <strong style='color:#8a775a'>Experiencia:</strong><br>
-                        <span style='font-size:12px;'><strong>{$nombrePaquete}</strong></span><br><br>
-                        <strong style='color:#8a775a'>Fecha de reserva:</strong><br>
-                        {$fechaReservaFormatted}<br><br>
-                        <strong style='color:#8a775a'>Fecha de inicio:</strong><br>
-                        {$fechaInicioFormatted}
+                    <td colspan='4' style='padding:15px 12px; text-align:center; color:#888;'>No hay viajeros registrados.</td>
+                </tr>";
+                }
+    $htmlPdf .= "
+            </tbody>
+        </table>
+    </div>
+
+    <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>Servicios incluidos</h3>
+    <div style='margin-bottom:30px;'>
+        <table>
+            <thead>
+                <tr style='background-color:#000000; color:#ffffff;'>
+                    <th style='padding:12px; text-align:left;'>Descripción</th>
+                    <th style='padding:12px; text-align:right;'>Precio</th>
+                </tr>
+            </thead>
+            <tbody>";
+                if ($serviciosIncluidos && $serviciosIncluidos->count() > 0) {
+                    foreach ($serviciosIncluidos as $index => $servicio) {
+                        $bg     = $index % 2 === 0 ? '#ffffff' : '#f5f5f5';
+                        $desc   = $servicio->descripcion ?? '';
+                        $precio = $servicio->precio ?? 0;
+                        $htmlPdf .= "
+                <tr style='background-color:{$bg};'>
+                    <td style='padding:15px 12px; border-bottom:1px solid rgba(0,0,0,0.15);'>{$desc}</td>
+                    <td style='padding:15px 12px; text-align:right; border-bottom:1px solid rgba(0,0,0,0.15);'>" . number_format((float) $precio, 2, ',', '.') . " €</td>
+                </tr>";
+                    }
+                } else {
+                    $htmlPdf .= "
+                <tr>
+                    <td colspan='2' style='padding:15px 12px; text-align:center; color:#888;'>No hay servicios adicionales incluidos.</td>
+                </tr>";
+                }
+    $htmlPdf .= "
+            </tbody>
+        </table>
+    </div>
+
+    <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>Gastos de gestión incluidos.</h5>
+    <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>Importe a pagar en el alojamiento: " . number_format($importeAlojamiento, 2, ',', '.') . " €</h5>
+    <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>Impuesto municipal: " . number_format($impuestoMunicipal, 2, ',', '.') . " €</h5>
+
+    <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>Experiencia</h3>
+    <div style='margin-bottom:30px;'>
+        <table>
+            <thead>
+                <tr style='background-color:#000000; color:#ffffff;'>
+                    <th style='padding:12px; text-align:left;'>Destino y fecha</th>
+                    <th style='padding:12px; text-align:center;'>Nº de viajeros</th>
+                    <th style='padding:12px; text-align:right;'>" . ($tipoPago === 'parcial' ? 'Importe Total' : 'Importe') . "</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style='background-color:#f5f5f5;'>
+                    <td style='padding:15px 12px; border-bottom:1px solid rgba(0,0,0,0.15);'>
+                        <strong>{$nombrePaquete}</strong><br>
+                        <span style='font-size:11px; color:#000000;'>Del {$fechaInicio} al {$fechaFin}</span>
                     </td>
-                    <td style='width:50%; padding:5px 10px; vertical-align:top;'>
-                        <strong style='color:#8a775a'>Fecha de fin:</strong><br>
-                        {$fechaFinFormatted}<br><br>
-                        <strong style='color:#8a775a'>Tipo de pago:</strong><br>
-                        <span style='background-color:" . (strtolower($tipoPago) === 'total' ? '#4cc33fff' : '#e89b0cff') . "; color:#8a775a; padding:3px 12px; border-radius:20px; font-size:12px; display:inline-block;'>" . strtoupper($tipoPago) . "</span><br><br>
-                        <strong style='color:#8a775a'>Número de viajeros:</strong><br>
+                    <td style='padding:15px 12px; text-align:center; border-bottom:1px solid rgba(0,0,0,0.15);'>
                         {$plazas}" . ($plazas == 1 ? ' persona' : ' personas') . "
                     </td>
+                    <td style='padding:15px 12px; text-align:right; border-bottom:1px solid rgba(0,0,0,0.15);'>
+                        <strong>{$subtotal} €</strong>
+                    </td>
                 </tr>
-            </table>
-        </div>
+            </tbody>
+        </table>
+    </div>
 
-        <!-- Viajeros (debajo de Detalles de la Experiencia) -->
-        <h3 style='color:#8a775a; font-size:16px; font-weight:bold; margin-bottom:15px;'>Viajeros</h3>
-        <div style='margin-bottom:30px;'>
-            <table style='width:100%; border-collapse:collapse; font-size:13px;'>
-                <thead>
-                    <tr style='background-color:#8a775a; color:#ffffff;'>
-                        <th style='padding:12px; text-align:left; border-radius:8px 0 0 0;'>Nombre</th>
-                        <th style='padding:12px; text-align:left;'>Apellidos</th>
-                        <th style='padding:12px; text-align:center;'>DNI</th>
-                        <th style='padding:12px; text-align:left; border-radius:0 8px 0 0;'>Email</th>
-                    </tr>
-                </thead>
-                <tbody>";
-                foreach ($participantes as $p) {
-                    $dni = $p['dni'] ?? 'N/A';
-                    $nombreP = $p['nombre'] ?? 'Nombre no disponible';
-                    $apellidosP = $p['apellidos'] ?? '';
-                    $emailP = $p['email'] ?? 'Email no disponible';
-                    $htmlPdf .= "
-                    <tr style='background-color:#fcf4ef;'>
-                        <td style='padding:12px; border-bottom:1px solid rgba(138,119,90,0.2);'>{$nombreP}</td>
-                        <td style='padding:12px; border-bottom:1px solid rgba(138,119,90,0.2);'>{$apellidosP}</td>
-                        <td style='padding:12px; text-align:center; border-bottom:1px solid rgba(138,119,90,0.2);'>{$dni}</td>
-                        <td style='padding:12px; border-bottom:1px solid rgba(138,119,90,0.2);'>{$emailP}</td>
-                    </tr>";
-                }
-$htmlPdf .= "
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Tabla de conceptos -->
-        <div style='margin-bottom:30px;'>
-            <table style='width:100%; border-collapse:collapse; font-size:13px;'>
-                <thead>
-                    <tr style='background-color:#8a775a; color:#ffffff;'>
-                        <th style='padding:12px; text-align:left; border-radius:8px 0 0 0;'>Experiencia</th>
-                        <th style='padding:12px; text-align:center;'>Nº de viajeros</th>
-                        <th style='padding:12px; text-align:center;'>" . (strtolower($tipoPago) === 'parcial' ? 'Nº de Cuotas' : 'Cantidad') . "</th>
-                        <th style='padding:12px; text-align:right;'>" . (strtolower($tipoPago) === 'parcial' ? 'Importe por Cuota' : 'Precio Unit.') . "</th>
-                        <th style='padding:12px; text-align:right; border-radius:0 8px 0 0;'>" . (strtolower($tipoPago) === 'parcial' ? 'Importe Total' : 'Importe') . "</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr style='background-color:#fcf4ef;'>
-                        <td style='padding:15px 12px; border-bottom:1px solid rgba(138,119,90,0.2);'>
-                            <strong>{$nombrePaquete}</strong><br>
-                            <span style='font-size:11px; color:#8a775a;'>Del {$fechaInicioFormatted} al {$fechaFinFormatted}</span>
-                        </td>
-                        <td style='padding:15px 12px; text-align:center; border-bottom:1px solid rgba(138,119,90,0.2);'>
-                            {$plazas}" . ($plazas == 1 ? ' persona' : ' personas') . "
-                        </td>
-                        <td style='padding:15px 12px; text-align:center; border-bottom:1px solid rgba(138,119,90,0.2);'>
-                            " . (strtolower($tipoPago) === 'parcial' ? "{$numCuotas}" : "{$plazas}") . "
-                        </td>
-                        <td style='padding:15px 12px; text-align:right; border-bottom:1px solid rgba(138,119,90,0.2);'>
-                            " . (strtolower($tipoPago) === 'parcial' ? "{$importeCuotas} €" : "{$precioUnitario} €") . "
-                        </td>
-                        <td style='padding:15px 12px; text-align:right; border-bottom:1px solid rgba(138,119,90,0.2);'>
-                            <strong>{$subtotal} €</strong>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Totales -->
-        <div style='width:100%; margin-top:20px;'>
-            <div style='width:300px; float:right;'>
-                <div style='background-color:#fcf4ef; padding:20px; border-radius:10px; border:2px solid #8a775a;'>
-                    <div style='display:flex; justify-content:space-between; margin-bottom:10px; font-size:13px;'>
-                        <span>Subtotal:</span>
-                        <span>{$baseImponibleFormatted} €</span>
-                    </div>
-                    <div style='display:flex; justify-content:space-between; margin-bottom:15px; font-size:13px; padding-bottom:15px; border-bottom:2px solid rgba(138,119,90,0.3);'>
-                        <span>IVA (21%):</span>
-                        <span>{$ivaFormatted} €</span>
-                    </div>
-                    <div style='display:flex; justify-content:space-between; font-size:15px; font-weight:bold; color:#8a775a;'>
-                        <span>TOTAL:</span>
-                        <span>{$totalPrecio} €</span>
-                    </div>
+    <div style='width:100%; margin-top:20px;'>
+        <div style='width:300px; float:right;'>
+            <div style='background-color:#f5f5f5; padding:20px; border-radius:10px; border:2px solid #000000;'>
+                <div style='display:flex; justify-content:space-between; margin-bottom:10px; font-size:13px;'>
+                    <span>Subtotal:</span><span>{$baseImponibleFormatted} €</span>
+                </div>
+                <div style='display:flex; justify-content:space-between; margin-bottom:15px; font-size:13px; padding-bottom:15px; border-bottom:2px solid rgba(0,0,0,0.3);'>
+                    <span>IVA (21%):</span><span>{$ivaFormatted} €</span>
+                </div>
+                <div style='display:flex; justify-content:space-between; font-size:15px; font-weight:bold;'>
+                    <span>TOTAL:</span><span>{$totalPrecioFormatted} €</span>
                 </div>
             </div>
-            <div style='clear:both;'></div>
         </div>
-
-        <!-- Información de pago -->
-        <div style='margin-top:30px; background-color:#f8f5f1; padding:15px 20px; border-radius:8px; border:1px solid rgba(138,119,90,0.2);'>
-            <strong style='color:#8a775a; font-size:14px;'>Información de Pago</strong>
-            <p style='margin:0; font-size:12px; line-height:1.6;'><strong>Método de pago:</strong> {$tipoPago}<br><strong>Estado:</strong> <span>PAGADO</span></p>
-        </div>
-
-        <!-- Footer -->
-        <div style='margin-top:40px; padding-top:20px; border-top:2px solid #8a775a; font-size:11px; color:#8a775a; text-align:center;'>
-            <p style='margin:0 0 5px 0;'><strong>Gracias por confiar en Atalanta</strong></p>
-            <p style='margin:0; opacity:0.8;'>Esta factura ha sido generada electrónicamente y es válida sin firma ni sello.</p>
-            <p style='margin:5px 0 0 0; opacity:0.8;'>Para cualquier consulta, contacte con nosotros en info@viajesatalanta.com o llame al +34 912 345 678</p>
-        </div>
-
+        <div style='clear:both;'></div>
     </div>
+
+    <div style='margin-top:40px; padding-top:20px; border-top:2px solid #000000; font-size:11px; color:#000000; text-align:center;'>
+        <p style='margin:0 0 5px 0;'><strong>Gracias por confiar en Atalanta</strong></p>
+        <p style='margin:0; opacity:0.8;'>Esta factura ha sido generada electrónicamente y es válida sin firma ni sello.</p>
+        <p style='margin:5px 0 0 0; opacity:0.8;'>Para cualquier consulta, contacte con nosotros en info@viajesatalanta.com o llame al +34 614 892 722</p>
+    </div>
+
+</div>
 </body>
 </html>";
 
     $pdf = PDF::loadHTML($htmlPdf)->setPaper('A4');
-    
 
-    // Descargar PDF
     return $pdf->download("factura_reserva_{$reservaId}.pdf");
 }
-
 }

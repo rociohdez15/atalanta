@@ -4,7 +4,7 @@ import Swal from "sweetalert2";
 
 const Hoteles = () => {
     const [currentPage, setCurrentPage] = useState(1);
-    const [entriesPerPage] = useState(10);
+    const [entriesPerPage] = useState(30);
 
     const [hoteles, setHoteles] = useState([]);
     const [hotelesFiltrados, setHotelesFiltrados] = useState([]);

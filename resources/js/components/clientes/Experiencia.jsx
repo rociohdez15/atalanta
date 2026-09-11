@@ -54,10 +54,6 @@ const Experiencia = () => {
        CARGAR PAQUETES
     ========================================================= */
 
-    /* =========================================================
-   CARGAR PAQUETES
-========================================================= */
-
     useEffect(() => {
         let cancelado = false;
 
@@ -68,12 +64,12 @@ const Experiencia = () => {
         params.append("page", pagina);
         params.append("size", tamañoPagina);
 
-        // Filtro de categoría
+        // FILTRO DE CATEGORÍA
         if (filtro && filtro !== "todas") {
             params.append("tipo_viaje", filtro);
         }
 
-        // Filtro de oferta
+        // FILTRO DE OFERTA
         if (filtroOferta && filtroOferta !== "todas") {
             params.append("oferta", filtroOferta);
         }
@@ -83,8 +79,19 @@ const Experiencia = () => {
             .then((res) => {
                 if (cancelado) return;
 
-                setImagenes(res.data.content || []);
-                setTotalPaginas(res.data.totalPages || 0);
+                const data = res.data;
+
+                const paquetes = Array.isArray(data)
+                    ? data
+                    : Array.isArray(data?.content)
+                      ? data.content
+                      : Array.isArray(data?.data)
+                        ? data.data
+                        : [];
+
+                setImagenes(paquetes);
+
+                setTotalPaginas(data?.totalPages || data?.last_page || 0);
 
                 setLoadedImages({});
             })
@@ -161,17 +168,17 @@ const Experiencia = () => {
     ========================================================= */
 
     const experienciasFiltradas = imagenes.filter((img) => {
-        // =========================================================
-        // FILTRO CATEGORÍA
-        // =========================================================
+        /* =====================================================
+           FILTRO CATEGORÍA
+        ===================================================== */
 
         if (filtro !== "todas" && img.tipo_viaje !== filtro) {
             return false;
         }
 
-        // =========================================================
-        // FILTRO OFERTA
-        // =========================================================
+        /* =====================================================
+           FILTRO OFERTA
+        ===================================================== */
 
         if (filtroOferta === "sin_oferta") {
             return !img.oferta;
@@ -183,12 +190,11 @@ const Experiencia = () => {
             }
         }
 
-        // =========================================================
-        // BLACK FRIDAY
-        // =========================================================
+        /* =====================================================
+           COMPROBAR FECHAS DE LA OFERTA
+        ===================================================== */
 
-        if (img.oferta === "black_friday") {
-            // Si no tiene fechas, no mostrarlo
+        if (img.oferta) {
             if (!img.oferta_inicio || !img.oferta_fin) {
                 return false;
             }
@@ -199,12 +205,12 @@ const Experiencia = () => {
 
             const fin = new Date(img.oferta_fin);
 
-            // Todavía no ha empezado
+            // La oferta todavía no ha comenzado
             if (ahora < inicio) {
                 return false;
             }
 
-            // Ya ha terminado
+            // La oferta ya ha terminado
             if (ahora > fin) {
                 return false;
             }
@@ -212,6 +218,7 @@ const Experiencia = () => {
 
         return true;
     });
+
     /* =========================================================
        LOADING
     ========================================================= */
@@ -407,115 +414,128 @@ const Experiencia = () => {
                             </p>
                         </div>
                     ) : (
-                        experienciasFiltradas.map((img, index) => (
-                            <motion.div
-                                key={img.id}
-                                className="col-12 col-md-6 col-lg-4 col-xl-3 d-flex"
-                                initial={{
-                                    y: 50,
-                                    opacity: 0,
-                                }}
-                                animate={{
-                                    y: 0,
-                                    opacity: 1,
-                                }}
-                                transition={{
-                                    duration: 0.6,
-                                    delay: index * 0.1,
-                                }}
-                            >
-                                {/* CARD */}
+                        experienciasFiltradas.map((img, index) => {
+                            const esProximamente =
+                                img.estado === "proximamente";
 
-                                <div
-                                    className="card border-0 shadow-sm w-100 h-100 d-flex flex-column rounded-4"
-                                    style={{
-                                        backgroundColor: "#000000",
-                                        border: "1px solid rgba(53, 55, 46, 0.1)",
-                                        transition: "all 0.5s ease",
-                                        minHeight: "500px",
+                            const esBlackFridayAgotado =
+                                img.oferta === "black_friday" &&
+                                img.plazas <= 0;
+
+                            return (
+                                <motion.div
+                                    key={img.id}
+                                    className="col-12 col-md-6 col-lg-4 col-xl-3 d-flex"
+                                    initial={{
+                                        y: 50,
+                                        opacity: 0,
                                     }}
-                                    onMouseEnter={(e) => {
-                                        e.currentTarget.style.transform =
-                                            "translateY(-8px)";
-
-                                        e.currentTarget.style.boxShadow =
-                                            "0 20px 30px rgba(0,0,0,0.15)";
+                                    animate={{
+                                        y: 0,
+                                        opacity: 1,
                                     }}
-                                    onMouseLeave={(e) => {
-                                        e.currentTarget.style.transform =
-                                            "translateY(0)";
-
-                                        e.currentTarget.style.boxShadow =
-                                            "0 0 0 rgba(0,0,0,0)";
+                                    transition={{
+                                        duration: 0.6,
+                                        delay: index * 0.1,
                                     }}
                                 >
                                     {/* =================================================
-                                            IMAGEN
+                                            CARD
                                         ================================================= */}
 
                                     <div
-                                        className="position-relative overflow-hidden"
+                                        className="card border-0 shadow-sm w-100 h-100 d-flex flex-column rounded-4"
                                         style={{
-                                            height: "200px",
+                                            backgroundColor: "#000000",
+                                            border: "1px solid rgba(53, 55, 46, 0.1)",
+                                            transition: "all 0.5s ease",
+                                            minHeight: "500px",
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.transform =
+                                                "translateY(-8px)";
+
+                                            e.currentTarget.style.boxShadow =
+                                                "0 20px 30px rgba(0,0,0,0.15)";
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.transform =
+                                                "translateY(0)";
+
+                                            e.currentTarget.style.boxShadow =
+                                                "0 0 0 rgba(0,0,0,0)";
                                         }}
                                     >
-                                        {/* LOADER */}
-
-                                        {!loadedImages[img.id] && (
-                                            <div
-                                                className="position-absolute top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center"
-                                                style={{
-                                                    zIndex: 1,
-                                                }}
-                                            >
-                                                <Loader
-                                                    size={48}
-                                                    color="#ffffff"
-                                                    className="spin"
-                                                />
-                                            </div>
-                                        )}
-
-                                        {/* CATEGORÍA */}
+                                        {/* =================================================
+                                                IMAGEN
+                                            ================================================= */}
 
                                         <div
-                                            className="position-absolute top-0 start-0 m-3 px-3 py-1 rounded-pill fw-semibold"
+                                            className="position-relative overflow-hidden"
                                             style={{
-                                                backgroundColor: "#ffffff",
-                                                color: "#000000",
-                                                fontFamily: "Inter, sans-serif",
-                                                fontSize: "12px",
-                                                textTransform: "capitalize",
-                                                zIndex: 3,
+                                                height: "200px",
                                             }}
                                         >
-                                            {img.tipo_viaje}
-                                        </div>
+                                            {/* LOADER */}
 
-                                        {/* OFERTA */}
+                                            {!loadedImages[img.id] && (
+                                                <div
+                                                    className="position-absolute top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center"
+                                                    style={{
+                                                        zIndex: 1,
+                                                    }}
+                                                >
+                                                    <Loader
+                                                        size={48}
+                                                        color="#ffffff"
+                                                        className="spin"
+                                                    />
+                                                </div>
+                                            )}
 
-                                        {img.oferta && (
+                                            {/* CATEGORÍA */}
+
                                             <div
-                                                className="position-absolute start-0 m-3 px-3 py-1 rounded-pill fw-semibold"
+                                                className="position-absolute top-0 start-0 m-3 px-3 py-1 rounded-pill fw-semibold"
                                                 style={{
-                                                    top: "30px",
-                                                    backgroundColor: "#000000",
-                                                    color: "#ffffff",
+                                                    backgroundColor: "#ffffff",
+                                                    color: "#000000",
                                                     fontFamily:
                                                         "Inter, sans-serif",
-                                                    fontSize: "11px",
+                                                    fontSize: "12px",
+                                                    textTransform: "capitalize",
                                                     zIndex: 3,
-                                                    border: "1px solid rgba(255,255,255,0.4)",
                                                 }}
                                             >
-                                                {getNombreOferta(img.oferta)}
+                                                {img.tipo_viaje}
                                             </div>
-                                        )}
 
-                                        {/* SOLD OUT - BLACK FRIDAY AGOTADO */}
+                                            {/* OFERTA */}
 
-                                        {img.oferta === "black_friday" &&
-                                            img.plazas <= 0 && (
+                                            {img.oferta && (
+                                                <div
+                                                    className="position-absolute start-0 m-3 px-3 py-1 rounded-pill fw-semibold"
+                                                    style={{
+                                                        top: "30px",
+                                                        backgroundColor:
+                                                            "#000000",
+                                                        color: "#ffffff",
+                                                        fontFamily:
+                                                            "Inter, sans-serif",
+                                                        fontSize: "11px",
+                                                        zIndex: 3,
+                                                        border: "1px solid rgba(255,255,255,0.4)",
+                                                    }}
+                                                >
+                                                    {getNombreOferta(
+                                                        img.oferta,
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {/* SOLD OUT */}
+
+                                            {esBlackFridayAgotado && (
                                                 <div
                                                     className="position-absolute top-50 start-50"
                                                     style={{
@@ -542,244 +562,302 @@ const Experiencia = () => {
                                                             "0 4px 10px rgba(0, 0, 0, 0.45)",
                                                     }}
                                                 >
-                                                    SOLD OUT&nbsp;&nbsp; SOLD
-                                                    OUT&nbsp;&nbsp; SOLD
-                                                    OUT&nbsp;&nbsp; SOLD OUT
+                                                    SOLD OUT &nbsp;&nbsp; SOLD
+                                                    OUT &nbsp;&nbsp; SOLD OUT
+                                                    &nbsp;&nbsp; SOLD OUT
                                                 </div>
                                             )}
-                                        {/* PRECIO */}
 
-                                        <div
-                                            className="position-absolute top-0 end-0 m-3 px-3 py-1 rounded-pill fw-semibold"
-                                            style={{
-                                                backgroundColor: "#ffffff",
-                                                color: "#000000",
-                                                fontFamily: "Inter, sans-serif",
-                                                fontSize: "12px",
-                                                zIndex: 3,
-                                            }}
-                                        >
-                                            {img.precio} €
-                                        </div>
+                                            {/* PRECIO */}
 
-                                        {/* IMAGEN */}
+                                            {/* =================================================
+                                                PRECIO
+                                                OCULTO SI ES PRÓXIMAMENTE
+                                            ================================================= */}
 
-                                        <img
-                                            src={`/storage/paquetes/portada/${img.id}/${img.foto}`}
-                                            alt={img.nombre}
-                                            className="w-100 h-100 rounded-top rounded-top-4"
-                                            style={{
-                                                objectFit: "cover",
-                                                transition:
-                                                    "transform 0.5s ease, opacity 0.3s ease",
-                                                opacity: loadedImages[img.id]
-                                                    ? 1
-                                                    : 0,
-                                            }}
-                                            onLoad={() =>
-                                                setLoadedImages((prev) => ({
-                                                    ...prev,
-                                                    [img.id]: true,
-                                                }))
-                                            }
-                                            onError={() =>
-                                                setLoadedImages((prev) => ({
-                                                    ...prev,
-                                                    [img.id]: true,
-                                                }))
-                                            }
-                                            onMouseEnter={(e) =>
-                                                (e.currentTarget.style.transform =
-                                                    "scale(1.1)")
-                                            }
-                                            onMouseLeave={(e) =>
-                                                (e.currentTarget.style.transform =
-                                                    "scale(1)")
-                                            }
-                                        />
+                                            {!esProximamente && (
+                                                <div
+                                                    className="position-absolute top-0 end-0 m-3 px-3 py-1 rounded-pill fw-semibold"
+                                                    style={{
+                                                        backgroundColor:
+                                                            "#ffffff",
+                                                        color: "#000000",
+                                                        fontFamily:
+                                                            "Inter, sans-serif",
+                                                        fontSize: "12px",
+                                                        zIndex: 3,
+                                                    }}
+                                                >
+                                                    {img.precio} €
+                                                </div>
+                                            )}
 
-                                        {/* OVERLAY */}
+                                            {/* IMAGEN */}
 
-                                        <div
-                                            className="position-absolute top-0 start-0 w-100 h-100"
-                                            style={{
-                                                background:
-                                                    "linear-gradient(to top, rgba(53,55,46,0.2), transparent)",
-                                                opacity: 0,
-                                                transition: "opacity 0.5s ease",
-                                            }}
-                                        ></div>
-                                    </div>
-
-                                    {/* =================================================
-                                            CONTENIDO
-                                        ================================================= */}
-
-                                    <div className="card-body d-flex flex-column text-center">
-                                        {/* NOMBRE */}
-
-                                        <h5
-                                            className="fw-bold mb-2"
-                                            style={{
-                                                color: "#ffffff",
-                                                fontFamily: "Inter, sans-serif",
-                                            }}
-                                        >
-                                            {img.nombre}
-                                        </h5>
-
-                                        {/* DESCRIPCIÓN */}
-
-                                        <p
-                                            className="mb-3 flex-grow-1"
-                                            style={{
-                                                color: "#ffffff",
-                                                fontSize: "0.9rem",
-                                                fontFamily: "Inter, sans-serif",
-                                            }}
-                                        >
-                                            {img.descripcion &&
-                                            img.descripcion.length > 130
-                                                ? img.descripcion.substring(
-                                                      0,
-                                                      130,
-                                                  ) + "..."
-                                                : img.descripcion}
-                                        </p>
-
-                                        {/* UBICACIÓN */}
-
-                                        <div
-                                            className="d-flex align-items-center mb-2"
-                                            style={{
-                                                color: "#ffffff",
-                                                fontSize: "0.9rem",
-                                                fontFamily: "Inter, sans-serif",
-                                            }}
-                                        >
-                                            <MapPin
-                                                size={16}
-                                                className="me-2"
-                                            />
-
-                                            <span className="fw-medium">
-                                                {img.lugar}
-                                            </span>
-                                        </div>
-
-                                        {/* FECHA */}
-
-                                        <div
-                                            className="d-flex align-items-center mb-3"
-                                            style={{
-                                                color: "#ffffff",
-                                                fontSize: "0.9rem",
-                                                fontFamily: "Inter, sans-serif",
-                                            }}
-                                        >
-                                            <Calendar
-                                                size={16}
-                                                className="me-2"
-                                            />
-
-                                            <span className="fw-medium">
-                                                {(() => {
-                                                    const inicio = new Date(
-                                                        img.fecha_inicio,
-                                                    );
-
-                                                    const fin = new Date(
-                                                        img.fecha_fin,
-                                                    );
-
-                                                    const diaInicio =
-                                                        inicio.getDate();
-
-                                                    const diaFin =
-                                                        fin.getDate();
-
-                                                    const mes =
-                                                        fin.toLocaleDateString(
-                                                            "es-ES",
-                                                            {
-                                                                month: "long",
-                                                            },
-                                                        );
-
-                                                    const año =
-                                                        fin.getFullYear();
-
-                                                    return `${diaInicio} al ${diaFin} de ${mes} de ${año}`;
-                                                })()}
-                                            </span>
-                                        </div>
-
-                                        {/* VER MÁS */}
-
-                                        {img.oferta === "black_friday" &&
-                                        img.plazas <= 0 ? (
-                                            <button
-                                                type="button"
-                                                disabled
-                                                className="btn w-100 mt-auto rounded-top-2"
+                                            <img
+                                                src={`/storage/paquetes/portada/${img.id}/${img.foto}`}
+                                                alt={img.nombre}
+                                                className="w-100 h-100 rounded-top rounded-top-4"
                                                 style={{
-                                                    backgroundColor:
-                                                        "rgba(255, 255, 255, 0.3)",
-                                                    color: "#999999",
-                                                    border: "1px solid rgba(255,255,255,0.2)",
-                                                    minWidth: "110px",
-                                                    textAlign: "center",
-                                                    fontSize: "12px",
-                                                    fontFamily:
-                                                        "Inter, sans-serif",
-                                                    cursor: "not-allowed",
-                                                    opacity: 0.6,
+                                                    objectFit: "cover",
+                                                    transition:
+                                                        "transform 0.5s ease, opacity 0.3s ease",
+                                                    opacity: loadedImages[
+                                                        img.id
+                                                    ]
+                                                        ? 1
+                                                        : 0,
                                                 }}
-                                            >
-                                                No disponible
-                                            </button>
-                                        ) : (
-                                            <Link
-                                                to={`/experiencia/${img.id}`}
-                                                className="btn w-100 mt-auto rounded-top-2"
+                                                onLoad={() =>
+                                                    setLoadedImages((prev) => ({
+                                                        ...prev,
+                                                        [img.id]: true,
+                                                    }))
+                                                }
+                                                onError={() =>
+                                                    setLoadedImages((prev) => ({
+                                                        ...prev,
+                                                        [img.id]: true,
+                                                    }))
+                                                }
+                                                onMouseEnter={(e) =>
+                                                    (e.currentTarget.style.transform =
+                                                        "scale(1.1)")
+                                                }
+                                                onMouseLeave={(e) =>
+                                                    (e.currentTarget.style.transform =
+                                                        "scale(1)")
+                                                }
+                                            />
+
+                                            {/* OVERLAY */}
+
+                                            <div
+                                                className="position-absolute top-0 start-0 w-100 h-100"
                                                 style={{
-                                                    backgroundColor:
-                                                        "rgba(255, 255, 255, 0.8)",
-                                                    backdropFilter:
-                                                        "blur(12px)",
-                                                    WebkitBackdropFilter:
-                                                        "blur(12px)",
-                                                    color: "#000000",
-                                                    border: "1px solid rgba(255,255,255,0.5)",
-                                                    minWidth: "110px",
-                                                    textAlign: "center",
-                                                    fontSize: "12px",
-                                                    transition: "all 0.3s ease",
+                                                    background:
+                                                        "linear-gradient(to top, rgba(53,55,46,0.2), transparent)",
+                                                    opacity: 0,
+                                                    transition:
+                                                        "opacity 0.5s ease",
+                                                }}
+                                            ></div>
+                                        </div>
+
+                                        {/* =================================================
+                                                CONTENIDO
+                                            ================================================= */}
+
+                                        <div className="card-body d-flex flex-column text-center">
+                                            {/* NOMBRE */}
+
+                                            <h5
+                                                className="fw-bold mb-2"
+                                                style={{
+                                                    color: "#ffffff",
                                                     fontFamily:
                                                         "Inter, sans-serif",
                                                 }}
-                                                onMouseEnter={(e) => {
-                                                    e.currentTarget.style.backgroundColor =
-                                                        "rgba(255, 255, 255, 0.2)";
+                                            >
+                                                {img.nombre}
+                                            </h5>
 
-                                                    e.currentTarget.style.color =
-                                                        "#ffffff";
-                                                }}
-                                                onMouseLeave={(e) => {
-                                                    e.currentTarget.style.backgroundColor =
-                                                        "rgba(255, 255, 255, 0.8)";
+                                            {/* DESCRIPCIÓN */}
+                                            {!esProximamente && (
+                                                <p
+                                                    className="mb-3 flex-grow-1"
+                                                    style={{
+                                                        color: "#ffffff",
+                                                        fontSize: "0.9rem",
+                                                        fontFamily:
+                                                            "Inter, sans-serif",
+                                                    }}
+                                                >
+                                                    {img.descripcion &&
+                                                    img.descripcion.length > 130
+                                                        ? img.descripcion.substring(
+                                                              0,
+                                                              130,
+                                                          ) + "..."
+                                                        : img.descripcion}
+                                                </p>
+                                            )}
 
-                                                    e.currentTarget.style.color =
-                                                        "#000000";
+                                            {/* =================================================
+                                                    UBICACIÓN
+                                                    SIEMPRE VISIBLE
+                                                ================================================= */}
+
+                                            <div
+                                                className={
+                                                    esProximamente
+                                                        ? "d-flex align-items-center mb-3"
+                                                        : "d-flex align-items-center mb-2"
+                                                }
+                                                style={{
+                                                    color: "#ffffff",
+                                                    fontSize: "0.9rem",
+                                                    fontFamily:
+                                                        "Inter, sans-serif",
                                                 }}
                                             >
-                                                Ver más
-                                            </Link>
-                                        )}
+                                                <MapPin
+                                                    size={16}
+                                                    className="me-2"
+                                                />
+
+                                                <span className="fw-medium">
+                                                    {img.lugar}
+                                                </span>
+                                            </div>
+
+                                            {/* =================================================
+                                                    FECHA
+                                                    OCULTA SI ES PRÓXIMAMENTE
+                                                ================================================= */}
+
+                                            {!esProximamente && (
+                                                <div
+                                                    className="d-flex align-items-center mb-3"
+                                                    style={{
+                                                        color: "#ffffff",
+                                                        fontSize: "0.9rem",
+                                                        fontFamily:
+                                                            "Inter, sans-serif",
+                                                    }}
+                                                >
+                                                    <Calendar
+                                                        size={16}
+                                                        className="me-2"
+                                                    />
+
+                                                    <span className="fw-medium">
+                                                        {(() => {
+                                                            const inicio =
+                                                                new Date(
+                                                                    img.fecha_inicio,
+                                                                );
+
+                                                            const fin =
+                                                                new Date(
+                                                                    img.fecha_fin,
+                                                                );
+
+                                                            const diaInicio =
+                                                                inicio.getDate();
+
+                                                            const diaFin =
+                                                                fin.getDate();
+
+                                                            const mes =
+                                                                fin.toLocaleDateString(
+                                                                    "es-ES",
+                                                                    {
+                                                                        month: "long",
+                                                                    },
+                                                                );
+
+                                                            const año =
+                                                                fin.getFullYear();
+
+                                                            return `${diaInicio} al ${diaFin} de ${mes} de ${año}`;
+                                                        })()}
+                                                    </span>
+                                                </div>
+                                            )}
+
+                                            {/* =================================================
+                                                    BOTÓN
+                                                ================================================= */}
+
+                                            {esProximamente ? (
+                                                <div
+                                                    className="btn w-100 mt-auto rounded-top-2"
+                                                    style={{
+                                                        backgroundColor:
+                                                            "rgba(255, 255, 255, 0.5)",
+                                                        backdropFilter:
+                                                            "blur(12px)",
+                                                        WebkitBackdropFilter:
+                                                            "blur(12px)",
+                                                        color: "#000000",
+                                                        border: "1px solid rgba(255,255,255,0.5)",
+                                                        minWidth: "110px",
+                                                        textAlign: "center",
+                                                        fontSize: "12px",
+                                                        fontFamily:
+                                                            "Inter, sans-serif",
+                                                        cursor: "default",
+                                                        opacity: 0.8,
+                                                    }}
+                                                >
+                                                    Próximamente
+                                                </div>
+                                            ) : esBlackFridayAgotado ? (
+                                                <button
+                                                    type="button"
+                                                    disabled
+                                                    className="btn w-100 mt-auto rounded-top-2"
+                                                    style={{
+                                                        backgroundColor:
+                                                            "rgba(255, 255, 255, 0.3)",
+                                                        color: "#999999",
+                                                        border: "1px solid rgba(255,255,255,0.2)",
+                                                        minWidth: "110px",
+                                                        textAlign: "center",
+                                                        fontSize: "12px",
+                                                        fontFamily:
+                                                            "Inter, sans-serif",
+                                                        cursor: "not-allowed",
+                                                        opacity: 0.6,
+                                                    }}
+                                                >
+                                                    No disponible
+                                                </button>
+                                            ) : (
+                                                <Link
+                                                    to={`/experiencia/${img.id}`}
+                                                    className="btn w-100 mt-auto rounded-top-2"
+                                                    style={{
+                                                        backgroundColor:
+                                                            "rgba(255, 255, 255, 0.8)",
+                                                        backdropFilter:
+                                                            "blur(12px)",
+                                                        WebkitBackdropFilter:
+                                                            "blur(12px)",
+                                                        color: "#000000",
+                                                        border: "1px solid rgba(255,255,255,0.5)",
+                                                        minWidth: "110px",
+                                                        textAlign: "center",
+                                                        fontSize: "12px",
+                                                        transition:
+                                                            "all 0.3s ease",
+                                                        fontFamily:
+                                                            "Inter, sans-serif",
+                                                    }}
+                                                    onMouseEnter={(e) => {
+                                                        e.currentTarget.style.backgroundColor =
+                                                            "rgba(255, 255, 255, 0.2)";
+
+                                                        e.currentTarget.style.color =
+                                                            "#ffffff";
+                                                    }}
+                                                    onMouseLeave={(e) => {
+                                                        e.currentTarget.style.backgroundColor =
+                                                            "rgba(255, 255, 255, 0.8)";
+
+                                                        e.currentTarget.style.color =
+                                                            "#000000";
+                                                    }}
+                                                >
+                                                    Ver más
+                                                </Link>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
-                            </motion.div>
-                        ))
+                                </motion.div>
+                            );
+                        })
                     )}
                 </div>
             </div>

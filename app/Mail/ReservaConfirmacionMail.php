@@ -387,10 +387,9 @@ class ReservaConfirmacionMail extends Mailable
                 $this->destino
                 ?: (
                     is_object($this->reserva)
-                        ? ($this->reserva->destino ?? 'Destino personalizado')
-                        : 'Destino personalizado'
+                    ? ($this->reserva->destino ?? 'Destino personalizado')
+                    : 'Destino personalizado'
                 );
-
         } else {
 
             $paqueteNombre =
@@ -407,15 +406,14 @@ class ReservaConfirmacionMail extends Mailable
         $fechaReserva =
             is_object($this->reserva)
             && !empty($this->reserva->fecha_reserva)
-                ? $this->reserva->fecha_reserva
-                : $this->fechaReservaFormatted;
+            ? $this->reserva->fecha_reserva
+            : $this->fechaReservaFormatted;
 
         try {
 
             $fechaReservaFormatted = Carbon::parse(
                 $fechaReserva
             )->format('d/m/Y');
-
         } catch (\Throwable $e) {
 
             $fechaReservaFormatted =
@@ -535,8 +533,8 @@ class ReservaConfirmacionMail extends Mailable
             $this->clienteNombreCompleto
             ?: trim(
                 ($this->cliente['nombre'] ?? '')
-                . ' '
-                . ($this->cliente['apellidos'] ?? '')
+                    . ' '
+                    . ($this->cliente['apellidos'] ?? '')
             );
 
         $subtotal = number_format(
@@ -638,17 +636,16 @@ class ReservaConfirmacionMail extends Mailable
                         isset($s['precio'])
                         && is_numeric($s['precio'])
                         && $s['precio'] > 0
-                            ? ' — ' . number_format(
-                                (float) $s['precio'],
-                                2,
-                                ',',
-                                '.'
-                            ) . ' €'
-                            : '';
+                        ? ' — ' . number_format(
+                            (float) $s['precio'],
+                            2,
+                            ',',
+                            '.'
+                        ) . ' €'
+                        : '';
 
                     $htmlEmail .=
                         "<li>{$desc}{$precio}</li>";
-
                 } elseif (is_string($s)) {
 
                     $decoded = json_decode($s, true);
@@ -663,17 +660,16 @@ class ReservaConfirmacionMail extends Mailable
                             isset($decoded['precio'])
                             && is_numeric($decoded['precio'])
                             && $decoded['precio'] > 0
-                                ? ' — ' . number_format(
-                                    (float) $decoded['precio'],
-                                    2,
-                                    ',',
-                                    '.'
-                                ) . ' €'
-                                : '';
+                            ? ' — ' . number_format(
+                                (float) $decoded['precio'],
+                                2,
+                                ',',
+                                '.'
+                            ) . ' €'
+                            : '';
 
                         $htmlEmail .=
                             "<li>{$desc}{$precio}</li>";
-
                     } else {
 
                         $htmlEmail .=
@@ -887,7 +883,6 @@ class ReservaConfirmacionMail extends Mailable
             $logoSrc =
                 'data:image/png;base64,' .
                 $logoBase64;
-
         } else {
 
             $logoSrc =
@@ -962,19 +957,6 @@ th {
 
             <td style='width:70%; vertical-align:middle; text-align:right;'>
 
-                <div
-                    style='background-color:#000000; color:#fff; padding:5px 15px; border-radius:6px; display:inline-block; margin-bottom:10px;'
-                >
-
-                    <div style='font-size:10px; opacity:0.9;'>
-                        FACTURA Nº
-                    </div>
-
-                    <div style='font-size:18px; font-weight:bold;'>
-                        {$reservaId}
-                    </div>
-
-                </div>
 
                 <div style='font-size:11px; color:#000000; text-align:right;'>
 
@@ -1045,33 +1027,33 @@ th {
                     <p>
                         <strong>
                             Nombre: " .
-                            ($this->cliente['nombre'] ?? '') .
-                            "
+            ($this->cliente['nombre'] ?? '') .
+            "
                         </strong>
                     </p>
 
                     <p style='margin:0 0 3px 0;'>
                         DNI: " .
-                        ($this->cliente['dni'] ?? '') .
-                        "
+            ($this->cliente['dni'] ?? '') .
+            "
                     </p>
 
                     <p style='margin:0 0 3px 0;'>
                         Dirección: " .
-                        ($this->cliente['direccion'] ?? '') .
-                        "
+            ($this->cliente['direccion'] ?? '') .
+            "
                     </p>
 
                     <p style='margin:0 0 3px 0;'>
                         Tel: " .
-                        ($this->cliente['telefono'] ?? '') .
-                        "
+            ($this->cliente['telefono'] ?? '') .
+            "
                     </p>
 
                     <p style='margin:0 0 3px 0;'>
                         Email: " .
-                        ($this->cliente['email'] ?? '') .
-                        "
+            ($this->cliente['email'] ?? '') .
+            "
                     </p>
 
                 </div>
@@ -1261,8 +1243,8 @@ th {
 
                 $bg =
                     $index % 2 === 0
-                        ? '#ffffff'
-                        : '#f5f5f5';
+                    ? '#ffffff'
+                    : '#f5f5f5';
 
                 if (is_object($servicio)) {
                     $servicio = (array) $servicio;
@@ -1278,14 +1260,13 @@ th {
 
                     $desc =
                         is_array($decoded)
-                            ? ($decoded['descripcion'] ?? $servicio)
-                            : $servicio;
+                        ? ($decoded['descripcion'] ?? $servicio)
+                        : $servicio;
 
                     $precio =
                         is_array($decoded)
-                            ? ($decoded['precio'] ?? 0)
-                            : 0;
-
+                        ? ($decoded['precio'] ?? 0)
+                        : 0;
                 } elseif (is_array($servicio)) {
 
                     $desc =
@@ -1295,7 +1276,6 @@ th {
                     $precio =
                         $servicio['precio']
                         ?? 0;
-
                 } else {
 
                     $desc = '';
@@ -1311,18 +1291,17 @@ th {
 
                     <td style='padding:15px 12px; text-align:right; border-bottom:1px solid rgba(0,0,0,0.15);'>
                         " .
-                        number_format(
-                            (float) $precio,
-                            2,
-                            ',',
-                            '.'
-                        ) .
-                        " €
+                    number_format(
+                        (float) $precio,
+                        2,
+                        ',',
+                        '.'
+                    ) .
+                    " €
                     </td>
 
                 </tr>";
             }
-
         } else {
 
             $htmlPdf .= "
@@ -1346,31 +1325,31 @@ th {
     </div>
 
     <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>
-        Gastos de gestión: 10%
+        Gastos de gestión incluidos.
     </h5>
 
     <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>
         Importe a pagar en el alojamiento:
         " .
-        number_format(
-            $this->importeAlojamiento,
-            2,
-            ',',
-            '.'
-        ) .
-        " €
+            number_format(
+                $this->importeAlojamiento,
+                2,
+                ',',
+                '.'
+            ) .
+            " €
     </h5>
 
     <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>
         Impuesto municipal:
         " .
-        number_format(
-            $this->impuestoMunicipal,
-            2,
-            ',',
-            '.'
-        ) .
-        " €
+            number_format(
+                $this->impuestoMunicipal,
+                2,
+                ',',
+                '.'
+            ) .
+            " €
     </h5>
 
     <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>
@@ -1395,12 +1374,12 @@ th {
 
                     <th style='padding:12px; text-align:right;'>
                         " .
-                        (
-                            $tipoPago === 'parcial'
-                                ? 'Importe Total'
-                                : 'Importe'
-                        ) .
-                        "
+            (
+                $tipoPago === 'parcial'
+                ? 'Importe Total'
+                : 'Importe'
+            ) .
+            "
                     </th>
 
                 </tr>
@@ -1415,13 +1394,13 @@ th {
 
                         <strong>{$paqueteNombre}</strong><br>";
 
-        if (!$this->esPersonalizado) {
+
 
             $htmlPdf .= "
                         <span style='font-size:11px; color:#000000;'>
                             Del {$fechaInicio} al {$fechaFin}
                         </span>";
-        }
+        
 
         $htmlPdf .= "
 
@@ -1431,12 +1410,12 @@ th {
 
                         {$plazas}
                         " .
-                        (
-                            $plazas == 1
-                                ? ' persona'
-                                : ' personas'
-                        ) .
-                        "
+            (
+                $plazas == 1
+                ? ' persona'
+                : ' personas'
+            ) .
+            "
 
                     </td>
 
@@ -1572,11 +1551,11 @@ th {
                     $voucher['path'],
                     [
                         'as' =>
-                            $voucher['name']
+                        $voucher['name']
                             ?? basename($voucher['path']),
 
                         'mime' =>
-                            $voucher['mime']
+                        $voucher['mime']
                             ?? 'application/pdf',
                     ]
                 );

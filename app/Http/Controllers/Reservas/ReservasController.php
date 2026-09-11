@@ -1124,38 +1124,32 @@ class ReservasController extends Controller
 
         Mail::to($emailCliente)->send(
             new ReservaConfirmacionMail(
-                $clienteArray,                               // 1
-                $reserva->fecha_reserva->format('d/m/Y'),    // 2
-                $reserva->fecha_inicio
-                    ? \Carbon\Carbon::parse($reserva->fecha_inicio)->format('d/m/Y')
-                    : 'No disponible',                       // 3
-                $reserva->fecha_fin
-                    ? \Carbon\Carbon::parse($reserva->fecha_fin)->format('d/m/Y')
-                    : 'No disponible',                       // 4
-                0,                                           // 5
-                $reserva->total_precio,                      // 6
-                $clienteNombreCompleto,                      // 7
-                $reserva->metodo_pago,                       // 8
-                $reserva->num_cuotas,                        // 9
-                $reserva->importe_cuotas,                    // 10
-                $reserva->num_personas,                      // 11
-                $reserva->total_precio,                      // 12
-                $reserva->destino ?? '',                     // 13
-                $linkPagoCuotas,                             // 14
-                $reserva,                                    // 15
-                $viajeros,                                   // 16
-                $paquete->nombre ?? '',                      // 17
-                $reserva->id,                                // 18
-                $clienteNombreCompleto,                      // 19
-                $reserva->fecha_inicio,                      // 20
-                $reserva->fecha_fin,                         // 21
-                $serviciosIncluidos,                         // 22
-                $serviciosNoIncluidos,                       // 23
-                $descuentos,                                 // 24
-                $itinerario,                                 // 25
-                $vouchers,                                    // 26  ✔ CORRECTO
-                $importeAlojamiento,                          // 27  ✔ CORRECTO
-                $impuestoMunicipal                            // 28  ✔ CORRECTO
+                $clienteArray,                              // 1
+                $reserva->fecha_reserva->format('d/m/Y'),  // 2
+                0,                                          // 3
+                $reserva->total_precio,                     // 4
+                $clienteNombreCompleto,                      // 5
+                $reserva->metodo_pago,                      // 6
+                $reserva->num_cuotas,                       // 7
+                $reserva->importe_cuotas,                   // 8
+                $reserva->num_personas,                     // 9
+                $reserva->total_precio,                     // 10
+                $reserva->destino ?? '',                    // 11
+                $linkPagoCuotas,                            // 12
+                $reserva,                                   // 13
+                $viajeros,                                  // 14
+                $paquete->nombre ?? '',                     // 15
+                $reserva->id,                               // 16
+                $clienteNombreCompleto,                     // 17
+                $reserva->fecha_inicio,                     // 18
+                $reserva->fecha_fin,                        // 19
+                $serviciosIncluidos,                        // 20
+                $serviciosNoIncluidos,                      // 21
+                $descuentos,                                // 22
+                $itinerario,                                // 23
+                $vouchers,                                  // 24
+                $importeAlojamiento,                        // 25
+                $impuestoMunicipal                          // 26
             )
         );
 

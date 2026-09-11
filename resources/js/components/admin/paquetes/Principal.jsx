@@ -17,36 +17,17 @@ const Principal = () => {
     */
 
     const [currentPage, setCurrentPage] = useState(1);
-
-    // Número de paquetes que queremos mostrar por página
     const entriesPerPage = 10;
 
     const [loading, setLoading] = useState(true);
-
-    // TODOS los paquetes recibidos de la API
     const [paquetes, setPaquetes] = useState([]);
-
-    // Paquetes que se muestran actualmente
     const [paquetesFiltrados, setPaquetesFiltrados] = useState([]);
-
     const [searchTerm, setSearchTerm] = useState("");
 
     /*
     |--------------------------------------------------------------------------
     | CARGAR TODOS LOS PAQUETES
     |--------------------------------------------------------------------------
-    |
-    | IMPORTANTE:
-    | Antes se enviaba:
-    |
-    | page: currentPage - 1
-    | size: 10
-    |
-    | Eso hacía que la API devolviera únicamente una página.
-    |
-    | Ahora pedimos una cantidad grande de paquetes y hacemos
-    | la paginación directamente en React.
-    |
     */
 
     const cargarPaquetes = async () => {
@@ -60,38 +41,22 @@ const Principal = () => {
                 },
             });
 
-            /*
-            |--------------------------------------------------------------------------
-            | OBTENER LOS DATOS
-            |--------------------------------------------------------------------------
-            */
-
             let data = [];
 
             if (Array.isArray(res.data)) {
                 data = res.data;
             } else if (Array.isArray(res.data.content)) {
                 data = res.data.content;
+            } else if (Array.isArray(res.data.data)) {
+                data = res.data.data;
             }
-
-            /*
-            |--------------------------------------------------------------------------
-            | SIN FILTROS
-            |--------------------------------------------------------------------------
-            |
-            | Todos los paquetes recibidos se muestran.
-            |
-            */
 
             setPaquetes(data);
             setPaquetesFiltrados(data);
-
             setCurrentPage(1);
         } catch (error) {
-            console.error(
-                "Error cargando paquetes:",
-                error
-            );
+            console.error("Error cargando paquetes:", error);
+            console.error("Respuesta:", error.response?.data);
 
             setPaquetes([]);
             setPaquetesFiltrados([]);
@@ -120,73 +85,42 @@ const Principal = () => {
     |--------------------------------------------------------------------------
     | BÚSQUEDA
     |--------------------------------------------------------------------------
-    |
-    | La búsqueda sigue utilizando el endpoint:
-    |
-    | /api/paquetes/buscar
-    |
-    | pero tampoco se aplica ningún filtro de ofertas.
-    |
     */
 
     useEffect(() => {
         const delayDebounce = setTimeout(async () => {
             const termino = searchTerm.trim();
 
-            /*
-            |--------------------------------------------------------------------------
-            | SIN TEXTO DE BÚSQUEDA
-            |--------------------------------------------------------------------------
-            */
-
             if (termino === "") {
                 setPaquetesFiltrados(paquetes);
                 setCurrentPage(1);
-
                 return;
             }
 
-            /*
-            |--------------------------------------------------------------------------
-            | BUSCAR
-            |--------------------------------------------------------------------------
-            */
-
             try {
-                const res = await axios.get(
-                    "/api/paquetes/buscar",
-                    {
-                        params: {
-                            input: termino,
-                        },
-                    }
-                );
+                const res = await axios.get("/api/paquetes/buscar", {
+                    params: {
+                        input: termino,
+                    },
+                });
 
                 let data = [];
 
                 if (Array.isArray(res.data)) {
                     data = res.data;
-                } else if (
-                    Array.isArray(res.data.content)
-                ) {
+                } else if (Array.isArray(res.data.content)) {
                     data = res.data.content;
+                } else if (Array.isArray(res.data.data)) {
+                    data = res.data.data;
                 } else if (res.data) {
                     data = [res.data];
                 }
 
-                /*
-                |--------------------------------------------------------------------------
-                | SIN FILTRAR POR OFERTA
-                |--------------------------------------------------------------------------
-                */
-
                 setPaquetesFiltrados(data);
                 setCurrentPage(1);
             } catch (error) {
-                console.error(
-                    "Error buscando paquetes:",
-                    error
-                );
+                console.error("Error buscando paquetes:", error);
+                console.error("Respuesta:", error.response?.data);
 
                 setPaquetesFiltrados([]);
                 setCurrentPage(1);
@@ -202,17 +136,13 @@ const Principal = () => {
     |--------------------------------------------------------------------------
     */
 
-    const indexOfLastPackage =
-        currentPage * entriesPerPage;
+    const indexOfLastPackage = currentPage * entriesPerPage;
+    const indexOfFirstPackage = indexOfLastPackage - entriesPerPage;
 
-    const indexOfFirstPackage =
-        indexOfLastPackage - entriesPerPage;
-
-    const currentPackages =
-        paquetesFiltrados.slice(
-            indexOfFirstPackage,
-            indexOfLastPackage
-        );
+    const currentPackages = paquetesFiltrados.slice(
+        indexOfFirstPackage,
+        indexOfLastPackage
+    );
 
     /*
     |--------------------------------------------------------------------------
@@ -222,10 +152,7 @@ const Principal = () => {
 
     const totalPages = Math.max(
         1,
-        Math.ceil(
-            paquetesFiltrados.length /
-                entriesPerPage
-        )
+        Math.ceil(paquetesFiltrados.length / entriesPerPage)
     );
 
     /*
@@ -236,11 +163,7 @@ const Principal = () => {
 
     const pageNumbers = [];
 
-    for (
-        let i = 1;
-        i <= totalPages;
-        i++
-    ) {
+    for (let i = 1; i <= totalPages; i++) {
         pageNumbers.push(i);
     }
 
@@ -251,10 +174,7 @@ const Principal = () => {
     */
 
     const paginate = (pageNumber) => {
-        if (
-            pageNumber < 1 ||
-            pageNumber > totalPages
-        ) {
+        if (pageNumber < 1 || pageNumber > totalPages) {
             return;
         }
 
@@ -288,57 +208,26 @@ const Principal = () => {
             }
 
             try {
-                await axios.delete(
-                    `/api/paquetes/eliminar/${id}`
-                );
-
-                /*
-                |--------------------------------------------------------------------------
-                | ELIMINAR DE LA LISTA PRINCIPAL
-                |--------------------------------------------------------------------------
-                */
+                await axios.delete(`/api/paquetes/eliminar/${id}`);
 
                 setPaquetes((prev) =>
-                    prev.filter(
-                        (paquete) =>
-                            paquete.id !== id
-                    )
+                    prev.filter((paquete) => paquete.id !== id)
                 );
-
-                /*
-                |--------------------------------------------------------------------------
-                | ELIMINAR DE LA LISTA VISIBLE
-                |--------------------------------------------------------------------------
-                */
 
                 setPaquetesFiltrados((prev) =>
-                    prev.filter(
-                        (paquete) =>
-                            paquete.id !== id
-                    )
+                    prev.filter((paquete) => paquete.id !== id)
                 );
 
-                /*
-                |--------------------------------------------------------------------------
-                | AJUSTAR PÁGINA SI ERA LA ÚLTIMA
-                |--------------------------------------------------------------------------
-                */
-
                 setCurrentPage((prevPage) => {
-                    const nuevosTotalPages =
-                        Math.max(
-                            1,
-                            Math.ceil(
-                                (paquetesFiltrados.length -
-                                    1) /
-                                    entriesPerPage
-                            )
-                        );
-
-                    return Math.min(
-                        prevPage,
-                        nuevosTotalPages
+                    const nuevosTotalPages = Math.max(
+                        1,
+                        Math.ceil(
+                            (paquetesFiltrados.length - 1) /
+                                entriesPerPage
+                        )
                     );
+
+                    return Math.min(prevPage, nuevosTotalPages);
                 });
 
                 Swal.fire(
@@ -347,10 +236,8 @@ const Principal = () => {
                     "success"
                 );
             } catch (error) {
-                console.error(
-                    "Error eliminando paquete:",
-                    error
-                );
+                console.error("Error eliminando paquete:", error);
+                console.error("Respuesta:", error.response?.data);
 
                 Swal.fire(
                     "Error",
@@ -368,9 +255,7 @@ const Principal = () => {
     */
 
     const handleEdit = async (id) => {
-        const paquete = paquetes.find(
-            (p) => p.id === id
-        );
+        const paquete = paquetes.find((p) => p.id === id);
 
         if (!paquete) {
             return;
@@ -378,8 +263,7 @@ const Principal = () => {
 
         let selectedImage = null;
 
-        const baseImageUrl =
-            `/storage/paquetes/portada/${paquete.id}/${paquete.foto}`;
+        const baseImageUrl = `/storage/paquetes/portada/${paquete.id}/${paquete.foto}`;
 
         await Swal.fire({
             title: "Editar Paquete",
@@ -398,9 +282,7 @@ const Principal = () => {
                     class="swal2-input"
                     value="${
                         paquete.fecha_inicio
-                            ? String(
-                                  paquete.fecha_inicio
-                              ).slice(0, 10)
+                            ? String(paquete.fecha_inicio).slice(0, 10)
                             : ""
                     }"
                 >
@@ -411,9 +293,7 @@ const Principal = () => {
                     class="swal2-input"
                     value="${
                         paquete.fecha_fin
-                            ? String(
-                                  paquete.fecha_fin
-                              ).slice(0, 10)
+                            ? String(paquete.fecha_fin).slice(0, 10)
                             : ""
                     }"
                 >
@@ -434,19 +314,53 @@ const Principal = () => {
                     value="${paquete.tipo_viaje || ""}"
                 >
 
-                <select
-                    id="swal-oferta"
-                    class="swal2-select"
-                    style="width: 80%; margin: 1em auto;"
-                >
+                <!-- ESTADO -->
 
+                <select
+                    id="swal-estado"
+                    class="swal2-select"
+                    style="
+                        width: 80%;
+                        margin: 1em auto;
+                    "
+                >
                     <option
-                        value=""
+                        value="proximamente"
                         ${
-                            !paquete.oferta
+                            paquete.estado === "proximamente"
                                 ? "selected"
                                 : ""
                         }
+                    >
+                        Próximamente
+                    </option>
+
+                    <option
+                        value="disponible"
+                        ${
+                            !paquete.estado ||
+                            paquete.estado === "disponible"
+                                ? "selected"
+                                : ""
+                        }
+                    >
+                        Disponible
+                    </option>
+                </select>
+
+                <!-- OFERTA -->
+
+                <select
+                    id="swal-oferta"
+                    class="swal2-select"
+                    style="
+                        width: 80%;
+                        margin: 1em auto;
+                    "
+                >
+                    <option
+                        value=""
+                        ${!paquete.oferta ? "selected" : ""}
                     >
                         Sin oferta
                     </option>
@@ -454,8 +368,7 @@ const Principal = () => {
                     <option
                         value="navidad"
                         ${
-                            paquete.oferta ===
-                            "navidad"
+                            paquete.oferta === "navidad"
                                 ? "selected"
                                 : ""
                         }
@@ -466,8 +379,7 @@ const Principal = () => {
                     <option
                         value="verano"
                         ${
-                            paquete.oferta ===
-                            "verano"
+                            paquete.oferta === "verano"
                                 ? "selected"
                                 : ""
                         }
@@ -478,8 +390,7 @@ const Principal = () => {
                     <option
                         value="san_valentin"
                         ${
-                            paquete.oferta ===
-                            "san_valentin"
+                            paquete.oferta === "san_valentin"
                                 ? "selected"
                                 : ""
                         }
@@ -490,8 +401,7 @@ const Principal = () => {
                     <option
                         value="black_friday"
                         ${
-                            paquete.oferta ===
-                            "black_friday"
+                            paquete.oferta === "black_friday"
                                 ? "selected"
                                 : ""
                         }
@@ -502,8 +412,7 @@ const Principal = () => {
                     <option
                         value="cyber_monday"
                         ${
-                            paquete.oferta ===
-                            "cyber_monday"
+                            paquete.oferta === "cyber_monday"
                                 ? "selected"
                                 : ""
                         }
@@ -514,15 +423,13 @@ const Principal = () => {
                     <option
                         value="bajada_precio"
                         ${
-                            paquete.oferta ===
-                            "bajada_precio"
+                            paquete.oferta === "bajada_precio"
                                 ? "selected"
                                 : ""
                         }
                     >
                         Bajada de precio
                     </option>
-
                 </select>
 
                 <div
@@ -532,7 +439,6 @@ const Principal = () => {
                         text-align: left;
                     "
                 >
-
                     <label
                         for="swal-oferta-inicio"
                         style="
@@ -560,7 +466,6 @@ const Principal = () => {
                                 : ""
                         }"
                     >
-
                 </div>
 
                 <div
@@ -570,7 +475,6 @@ const Principal = () => {
                         text-align: left;
                     "
                 >
-
                     <label
                         for="swal-oferta-fin"
                         style="
@@ -598,7 +502,6 @@ const Principal = () => {
                                 : ""
                         }"
                     >
-
                 </div>
 
                 <textarea
@@ -607,18 +510,35 @@ const Principal = () => {
                     placeholder="Descripción"
                 >${paquete.descripcion || ""}</textarea>
 
+                <!-- FOTO -->
+
                 <input
                     id="swal-foto"
                     type="file"
                     class="swal2-file"
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/webp"
                 >
+
+                <small
+                    style="
+                        display: block;
+                        width: 80%;
+                        margin: 5px auto 0;
+                        color: #777;
+                        text-align: left;
+                    "
+                >
+                    JPG, JPEG, PNG o WEBP. Máximo 5 MB.
+                </small>
 
                 <img
                     id="preview-image"
                     src="${baseImageUrl}"
+                    alt="Vista previa"
                     style="
                         max-width: 100%;
+                        max-height: 250px;
+                        object-fit: contain;
                         margin-top: 10px;
                     "
                 />
@@ -632,87 +552,133 @@ const Principal = () => {
                 >
             `,
 
+            /*
+            |--------------------------------------------------------------------------
+            | SELECCIONAR IMAGEN
+            |--------------------------------------------------------------------------
+            */
+
             didOpen: () => {
-                const fileInput =
-                    document.getElementById(
-                        "swal-foto"
-                    );
+                const fileInput = document.getElementById("swal-foto");
+                const preview = document.getElementById("preview-image");
 
-                const preview =
-                    document.getElementById(
-                        "preview-image"
-                    );
-
-                if (
-                    !fileInput ||
-                    !preview
-                ) {
+                if (!fileInput || !preview) {
                     return;
                 }
 
-                fileInput.addEventListener(
-                    "change",
-                    (e) => {
-                        const file =
-                            e.target.files[0];
+                fileInput.addEventListener("change", (e) => {
+                    const file = e.target.files[0];
 
-                        if (!file) {
-                            return;
-                        }
-
-                        selectedImage = file;
-
-                        const reader =
-                            new FileReader();
-
-                        reader.onload =
-                            function (event) {
-                                preview.src =
-                                    event.target.result;
-                            };
-
-                        reader.readAsDataURL(
-                            file
-                        );
+                    if (!file) {
+                        selectedImage = null;
+                        return;
                     }
-                );
+
+                    /*
+                    |------------------------------------------------------------------
+                    | VALIDAR TIPO
+                    |------------------------------------------------------------------
+                    */
+
+                    const tiposPermitidos = [
+                        "image/jpeg",
+                        "image/png",
+                        "image/webp",
+                    ];
+
+                    if (!tiposPermitidos.includes(file.type)) {
+                        selectedImage = null;
+                        fileInput.value = "";
+
+                        Swal.fire({
+                            title: "Imagen no válida",
+                            text: "Solo se permiten imágenes JPG, JPEG, PNG o WEBP.",
+                            icon: "error",
+                        });
+
+                        return;
+                    }
+
+                    /*
+                    |------------------------------------------------------------------
+                    | VALIDAR TAMAÑO
+                    |------------------------------------------------------------------
+                    */
+
+                    const maxSize = 5 * 1024 * 1024;
+
+                    if (file.size > maxSize) {
+                        selectedImage = null;
+                        fileInput.value = "";
+
+                        Swal.fire({
+                            title: "Imagen demasiado grande",
+                            text: "La imagen no puede superar los 5 MB.",
+                            icon: "error",
+                        });
+
+                        return;
+                    }
+
+                    /*
+                    |------------------------------------------------------------------
+                    | GUARDAR IMAGEN
+                    |------------------------------------------------------------------
+                    */
+
+                    selectedImage = file;
+
+                    /*
+                    |------------------------------------------------------------------
+                    | PREVISUALIZACIÓN
+                    |------------------------------------------------------------------
+                    */
+
+                    const reader = new FileReader();
+
+                    reader.onload = (event) => {
+                        preview.src = event.target.result;
+                    };
+
+                    reader.readAsDataURL(file);
+                });
             },
 
             focusConfirm: false,
 
-            confirmButtonText:
-                "Guardar cambios",
+            confirmButtonText: "Guardar cambios",
+
+            /*
+            |--------------------------------------------------------------------------
+            | PRECONFIRM
+            |--------------------------------------------------------------------------
+            */
 
             preConfirm: () => {
-                const oferta =
-                    document.getElementById(
-                        "swal-oferta"
-                    ).value;
+                const estado = document.getElementById(
+                    "swal-estado"
+                ).value;
 
-                const ofertaInicio =
-                    document.getElementById(
-                        "swal-oferta-inicio"
-                    ).value;
+                const oferta = document.getElementById(
+                    "swal-oferta"
+                ).value;
 
-                const ofertaFin =
-                    document.getElementById(
-                        "swal-oferta-fin"
-                    ).value;
+                const ofertaInicio = document.getElementById(
+                    "swal-oferta-inicio"
+                ).value;
+
+                const ofertaFin = document.getElementById(
+                    "swal-oferta-fin"
+                ).value;
 
                 /*
-                |--------------------------------------------------------------------------
+                |------------------------------------------------------------------
                 | VALIDAR BLACK FRIDAY
-                |--------------------------------------------------------------------------
+                |------------------------------------------------------------------
                 */
 
-                if (
-                    oferta ===
-                    "black_friday"
-                ) {
-                    if (
-                        !ofertaInicio ||
-                        !ofertaFin
-                    ) {
+                if (oferta === "black_friday") {
+                    if (!ofertaInicio || !ofertaFin) {
                         Swal.showValidationMessage(
                             "Debes indicar el inicio y el fin de la oferta Black Friday."
                         );
@@ -720,15 +686,8 @@ const Principal = () => {
                         return false;
                     }
 
-                    const inicio =
-                        new Date(
-                            ofertaInicio
-                        );
-
-                    const fin =
-                        new Date(
-                            ofertaFin
-                        );
+                    const inicio = new Date(ofertaInicio);
+                    const fin = new Date(ofertaFin);
 
                     if (fin <= inicio) {
                         Swal.showValidationMessage(
@@ -739,78 +698,66 @@ const Principal = () => {
                     }
                 }
 
+                /*
+                |------------------------------------------------------------------
+                | DEVOLVER DATOS
+                |------------------------------------------------------------------
+                */
+
                 return {
-                    nombre:
-                        document.getElementById(
-                            "swal-nombre"
-                        ).value,
+                    nombre: document.getElementById("swal-nombre").value,
 
-                    fecha_inicio:
-                        document.getElementById(
-                            "swal-fecha-inicio"
-                        ).value,
+                    fecha_inicio: document.getElementById(
+                        "swal-fecha-inicio"
+                    ).value,
 
-                    fecha_fin:
-                        document.getElementById(
-                            "swal-fecha-fin"
-                        ).value,
+                    fecha_fin: document.getElementById(
+                        "swal-fecha-fin"
+                    ).value,
 
-                    precio:
-                        parseFloat(
-                            document.getElementById(
-                                "swal-precio"
-                            ).value
-                        ),
+                    precio: parseFloat(
+                        document.getElementById("swal-precio").value
+                    ),
 
-                    tipo_viaje:
-                        document.getElementById(
-                            "swal-tipo"
-                        ).value,
+                    tipo_viaje: document.getElementById(
+                        "swal-tipo"
+                    ).value,
+
+                    estado,
 
                     oferta,
 
-                    oferta_inicio:
-                        ofertaInicio ||
-                        null,
+                    oferta_inicio: ofertaInicio || null,
 
-                    oferta_fin:
-                        ofertaFin ||
-                        null,
+                    oferta_fin: ofertaFin || null,
 
-                    descripcion:
-                        document.getElementById(
-                            "swal-desc"
-                        ).value,
+                    descripcion: document.getElementById(
+                        "swal-desc"
+                    ).value,
 
-                    fotoFile:
-                        selectedImage,
+                    fotoFile: selectedImage,
 
-                    plazas:
-                        parseInt(
-                            document.getElementById(
-                                "swal-plazas"
-                            ).value
-                        ),
+                    plazas: parseInt(
+                        document.getElementById("swal-plazas").value
+                    ),
                 };
             },
         }).then(async (result) => {
-            if (
-                !result.isConfirmed ||
-                !result.value
-            ) {
+            if (!result.isConfirmed || !result.value) {
                 return;
             }
 
-            const formValues =
-                result.value;
+            const formValues = result.value;
 
-            const formData =
-                new FormData();
+            /*
+            |--------------------------------------------------------------------------
+            | CREAR FORMDATA
+            |--------------------------------------------------------------------------
+            */
 
-            formData.append(
-                "_method",
-                "PUT"
-            );
+            const formData = new FormData();
+
+            formData.append("_method", "PUT");
 
             formData.append(
                 "nombre",
@@ -838,22 +785,23 @@ const Principal = () => {
             );
 
             formData.append(
+                "estado",
+                formValues.estado
+            );
+
+            formData.append(
                 "oferta",
                 formValues.oferta
             );
 
-            if (
-                formValues.oferta_inicio
-            ) {
+            if (formValues.oferta_inicio) {
                 formData.append(
                     "oferta_inicio",
                     formValues.oferta_inicio
                 );
             }
 
-            if (
-                formValues.oferta_fin
-            ) {
+            if (formValues.oferta_fin) {
                 formData.append(
                     "oferta_fin",
                     formValues.oferta_fin
@@ -870,27 +818,52 @@ const Principal = () => {
                 formValues.plazas
             );
 
-            if (
-                formValues.fotoFile
-            ) {
+            /*
+            |--------------------------------------------------------------------------
+            | AÑADIR FOTO SOLAMENTE SI SE HA CAMBIADO
+            |--------------------------------------------------------------------------
+            */
+
+            if (formValues.fotoFile instanceof File) {
                 formData.append(
                     "foto",
                     formValues.fotoFile
                 );
             }
 
+            /*
+            |--------------------------------------------------------------------------
+            | DEBUG DE LA FOTO
+            |--------------------------------------------------------------------------
+            */
+
+            if (formValues.fotoFile instanceof File) {
+                console.log("Imagen enviada:");
+                console.log("Nombre:", formValues.fotoFile.name);
+                console.log("Tipo:", formValues.fotoFile.type);
+                console.log(
+                    "Tamaño:",
+                    (
+                        formValues.fotoFile.size /
+                        1024 /
+                        1024
+                    ).toFixed(2) + " MB"
+                );
+            } else {
+                console.log("No se ha cambiado la imagen.");
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | ACTUALIZAR
+            |--------------------------------------------------------------------------
+            */
+
             try {
-                const res =
-                    await axios.post(
-                        `/api/paquetes/editar/${id}`,
-                        formData,
-                        {
-                            headers: {
-                                "Content-Type":
-                                    "multipart/form-data",
-                            },
-                        }
-                    );
+                const res = await axios.post(
+                    `/api/paquetes/editar/${id}`,
+                    formData
+                );
 
                 Swal.fire(
                     "Éxito",
@@ -898,20 +871,13 @@ const Principal = () => {
                     "success"
                 );
 
-                /*
-                |--------------------------------------------------------------------------
-                | DATOS ACTUALIZADOS
-                |--------------------------------------------------------------------------
-                */
-
                 const updatedData =
-                    res.data.paquete ||
-                    res.data;
+                    res.data.paquete || res.data;
 
                 /*
-                |--------------------------------------------------------------------------
+                |------------------------------------------------------------------
                 | ACTUALIZAR TODOS LOS PAQUETES
-                |--------------------------------------------------------------------------
+                |------------------------------------------------------------------
                 */
 
                 setPaquetes((prev) =>
@@ -926,21 +892,20 @@ const Principal = () => {
                 );
 
                 /*
-                |--------------------------------------------------------------------------
+                |------------------------------------------------------------------
                 | ACTUALIZAR LISTA VISIBLE
-                |--------------------------------------------------------------------------
+                |------------------------------------------------------------------
                 */
 
-                setPaquetesFiltrados(
-                    (prev) =>
-                        prev.map((p) =>
-                            p.id === id
-                                ? {
-                                      ...p,
-                                      ...updatedData,
-                                  }
-                                : p
-                        )
+                setPaquetesFiltrados((prev) =>
+                    prev.map((p) =>
+                        p.id === id
+                            ? {
+                                  ...p,
+                                  ...updatedData,
+                              }
+                            : p
+                    )
                 );
             } catch (error) {
                 console.error(
@@ -948,14 +913,48 @@ const Principal = () => {
                     error
                 );
 
-                Swal.fire(
-                    "Error",
-                    error.response
-                        ?.data
-                        ?.message ||
-                        "No se pudo actualizar el paquete",
-                    "error"
+                console.error(
+                    "Status:",
+                    error.response?.status
                 );
+
+                console.error(
+                    "Respuesta Laravel:",
+                    error.response?.data
+                );
+
+                console.error(
+                    "Errores de validación:",
+                    error.response?.data?.errors
+                );
+
+                /*
+                |------------------------------------------------------------------
+                | MOSTRAR ERROR DE VALIDACIÓN
+                |------------------------------------------------------------------
+                */
+
+                const errores =
+                    error.response?.data?.errors;
+
+                let mensaje =
+                    error.response?.data?.message ||
+                    "No se pudo actualizar el paquete.";
+
+                if (errores) {
+                    const mensajesErrores =
+                        Object.values(errores)
+                            .flat()
+                            .join("<br>");
+
+                    mensaje = mensajesErrores;
+                }
+
+                Swal.fire({
+                    title: "Error",
+                    html: mensaje,
+                    icon: "error",
+                });
             }
         });
     };
@@ -976,11 +975,9 @@ const Principal = () => {
                     <div className="row">
                         <div className="col-12">
                             <div className="page-title-box">
-
                                 <h4 className="page-title text-center">
                                     Listado de Paquetes
                                 </h4>
-
                             </div>
                         </div>
                     </div>
@@ -1012,9 +1009,7 @@ const Principal = () => {
                                     style={{
                                         width: 150,
                                     }}
-                                    value={
-                                        searchTerm
-                                    }
+                                    value={searchTerm}
                                     onChange={(e) =>
                                         setSearchTerm(
                                             e.target.value
@@ -1031,9 +1026,7 @@ const Principal = () => {
 
                             {loading ? (
                                 <div className="text-center mt-5">
-
                                     <div className="spinner-border text-primary"></div>
-
                                 </div>
                             ) : (
                                 <table className="table table-sm table-bordered align-middle mb-0">
@@ -1063,6 +1056,10 @@ const Principal = () => {
 
                                             <th className="text-start">
                                                 Tipo de Viaje
+                                            </th>
+
+                                            <th className="text-start">
+                                                Estado
                                             </th>
 
                                             <th className="text-start">
@@ -1098,24 +1095,19 @@ const Principal = () => {
 
                                     <tbody>
 
-                                        {currentPackages.length >
-                                        0 ? (
+                                        {currentPackages.length > 0 ? (
                                             currentPackages.map(
                                                 (paquete) => (
                                                     <tr
-                                                        key={
-                                                            paquete.id
-                                                        }
+                                                        key={paquete.id}
                                                         onClick={() =>
                                                             handleRowClick(
                                                                 paquete.id
                                                             )
                                                         }
                                                         style={{
-                                                            cursor:
-                                                                "pointer",
-                                                            position:
-                                                                "relative",
+                                                            cursor: "pointer",
+                                                            position: "relative",
                                                             backgroundColor:
                                                                 paquete.is_read
                                                                     ? "transparent"
@@ -1131,15 +1123,11 @@ const Principal = () => {
                                                                     "relative",
                                                             }}
                                                         >
-                                                            {
-                                                                paquete.id
-                                                            }
+                                                            {paquete.id}
                                                         </td>
 
                                                         <td>
-                                                            {
-                                                                paquete.nombre
-                                                            }
+                                                            {paquete.nombre}
                                                         </td>
 
                                                         <td>
@@ -1163,23 +1151,25 @@ const Principal = () => {
                                                         </td>
 
                                                         <td>
-                                                            {
-                                                                paquete.precio
-                                                            }{" "}
-                                                            €
+                                                            {paquete.precio} €
                                                         </td>
 
                                                         <td>
-                                                            {
-                                                                paquete.tipo_viaje
-                                                            }
+                                                            {paquete.tipo_viaje}
+                                                        </td>
+
+                                                        {/* ESTADO */}
+
+                                                        <td>
+                                                            {paquete.estado ===
+                                                            "proximamente"
+                                                                ? "Próximamente"
+                                                                : "Disponible"}
                                                         </td>
 
                                                         <td>
-                                                            {
-                                                                paquete.oferta ||
-                                                                "Sin oferta"
-                                                            }
+                                                            {paquete.oferta ||
+                                                                "Sin oferta"}
                                                         </td>
 
                                                         <td>
@@ -1203,9 +1193,7 @@ const Principal = () => {
                                                         </td>
 
                                                         <td>
-                                                            {
-                                                                paquete.descripcion
-                                                            }
+                                                            {paquete.descripcion}
                                                         </td>
 
                                                         <td>
@@ -1225,18 +1213,14 @@ const Principal = () => {
                                                         </td>
 
                                                         <td>
-                                                            {
-                                                                paquete.plazas
-                                                            }
+                                                            {paquete.plazas}
                                                         </td>
 
                                                         <td>
 
                                                             <button
                                                                 className="btn btn-warning btn-sm me-2"
-                                                                onClick={(
-                                                                    e
-                                                                ) => {
+                                                                onClick={(e) => {
                                                                     e.stopPropagation();
 
                                                                     handleEdit(
@@ -1249,9 +1233,7 @@ const Principal = () => {
 
                                                             <button
                                                                 className="btn btn-success btn-sm"
-                                                                onClick={(
-                                                                    e
-                                                                ) => {
+                                                                onClick={(e) => {
                                                                     e.stopPropagation();
 
                                                                     handleDelete(
@@ -1269,15 +1251,13 @@ const Principal = () => {
                                             )
                                         ) : (
                                             <tr>
-
                                                 <td
-                                                    colSpan="13"
+                                                    colSpan="14"
                                                     className="text-center text-muted"
                                                 >
                                                     No se encontraron
                                                     resultados.
                                                 </td>
-
                                             </tr>
                                         )}
 
@@ -1291,13 +1271,11 @@ const Principal = () => {
                         {/* PAGINACIÓN */}
 
                         {!loading &&
-                            paquetesFiltrados.length >
-                                0 && (
+                            paquetesFiltrados.length > 0 && (
                                 <div
                                     className="d-flex justify-content-center align-items-center mt-3 text-secondary"
                                     style={{
-                                        fontSize:
-                                            "0.75rem",
+                                        fontSize: "0.75rem",
                                     }}
                                 >
 
@@ -1308,8 +1286,7 @@ const Principal = () => {
 
                                             <li
                                                 className={`page-item ${
-                                                    currentPage ===
-                                                    1
+                                                    currentPage === 1
                                                         ? "disabled"
                                                         : ""
                                                 }`}
@@ -1320,13 +1297,11 @@ const Principal = () => {
                                                     aria-label="Previous"
                                                     onClick={() =>
                                                         paginate(
-                                                            currentPage -
-                                                                1
+                                                            currentPage - 1
                                                         )
                                                     }
                                                     disabled={
-                                                        currentPage ===
-                                                        1
+                                                        currentPage === 1
                                                     }
                                                 >
                                                     <i className="fas fa-chevron-left" />
@@ -1337,13 +1312,9 @@ const Principal = () => {
                                             {/* NÚMEROS */}
 
                                             {pageNumbers.map(
-                                                (
-                                                    number
-                                                ) => (
+                                                (number) => (
                                                     <li
-                                                        key={
-                                                            number
-                                                        }
+                                                        key={number}
                                                         className={`page-item ${
                                                             number ===
                                                             currentPage
@@ -1360,9 +1331,7 @@ const Principal = () => {
                                                                 )
                                                             }
                                                         >
-                                                            {
-                                                                number
-                                                            }
+                                                            {number}
                                                         </button>
 
                                                     </li>
@@ -1385,8 +1354,7 @@ const Principal = () => {
                                                     aria-label="Next"
                                                     onClick={() =>
                                                         paginate(
-                                                            currentPage +
-                                                                1
+                                                            currentPage + 1
                                                         )
                                                     }
                                                     disabled={
@@ -1408,23 +1376,17 @@ const Principal = () => {
                         {/* INFORMACIÓN DE RESULTADOS */}
 
                         {!loading &&
-                            paquetesFiltrados.length >
-                                0 && (
+                            paquetesFiltrados.length > 0 && (
                                 <div className="text-center text-muted mt-2">
 
                                     Mostrando{" "}
-                                    {indexOfFirstPackage +
-                                        1}{" "}
-                                    -{" "}
+                                    {indexOfFirstPackage + 1} -{" "}
                                     {Math.min(
                                         indexOfLastPackage,
                                         paquetesFiltrados.length
                                     )}{" "}
                                     de{" "}
-                                    {
-                                        paquetesFiltrados.length
-                                    }{" "}
-                                    paquetes
+                                    {paquetesFiltrados.length} paquetes
 
                                 </div>
                             )}

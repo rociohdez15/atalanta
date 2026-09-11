@@ -1255,9 +1255,8 @@ export default function DashboardProfesional() {
                                                     "Fecha Reserva",
                                                     "Fecha Inicio",
                                                     "Fecha Fin",
-                                                    "Tipo de Pago",
                                                     "Nº Viajeros",
-                                                    "Total (€)",
+                                                    "Total",
                                                     "Factura",
                                                 ].map((header) => (
                                                     <th
@@ -1355,48 +1354,7 @@ export default function DashboardProfesional() {
                                                                   ).toLocaleDateString()
                                                                 : "-"}
                                                         </td>
-                                                        <td>
-                                                            <span
-                                                                className={`badge ${
-                                                                    res.tipo_pago &&
-                                                                    res.tipo_pago
-                                                                        .trim()
-                                                                        .toLowerCase() ===
-                                                                        "total"
-                                                                        ? "#a0bac1"
-                                                                        : "#efb66a"
-                                                                }`}
-                                                                style={{
-                                                                    backgroundColor:
-                                                                        res.tipo_pago &&
-                                                                        res.tipo_pago
-                                                                            .trim()
-                                                                            .toLowerCase() ===
-                                                                            "total"
-                                                                            ? "#4cc33fff"
-                                                                            : "#e89b0cff",
-                                                                    color: "#ffffff",
-                                                                    padding:
-                                                                        "0.35em 0.65em",
-                                                                    fontSize:
-                                                                        "0.9em",
-                                                                    fontFamily:
-                                                                        "Inter, sans-serif",
-                                                                }}
-                                                            >
-                                                                {res.tipo_pago
-                                                                    ? res.tipo_pago
-                                                                          .charAt(
-                                                                              0,
-                                                                          )
-                                                                          .toUpperCase() +
-                                                                      res.tipo_pago.slice(
-                                                                          1,
-                                                                      )
-                                                                    : "-"}
-                                                            </span>
-                                                        </td>
-
+                                                        
                                                         <td
                                                             style={{
                                                                 color: "#ffffff",
@@ -1418,7 +1376,7 @@ export default function DashboardProfesional() {
                                                                     "12px",
                                                             }}
                                                         >
-                                                            {res.total_precio}
+                                                            {res.total_precio} €
                                                         </td>
                                                         <td>
                                                             <button

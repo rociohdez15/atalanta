@@ -70,123 +70,122 @@ class FacturasController extends Controller
     }
 
 
-    public function generarFacturaAdmin(Request $request, $reservaId, $clienteId)
-    {
-        // 🔐 Validar cookie y autenticar usuario
-        $token = $request->cookie('access_token');
-        if (!$token) {
-            return response()->json(['error' => 'Usuario no autenticado'], 401);
-        }
+   public function generarFacturaAdmin(Request $request, $reservaId, $clienteId)
+{
+    // 🔐 Validar cookie y autenticar usuario
+    $token = $request->cookie('access_token');
+    if (!$token) {
+        return response()->json(['error' => 'Usuario no autenticado'], 401);
+    }
 
-        try {
-            $user = JWTAuth::setToken($token)->authenticate();
-        } catch (\Exception $e) {
-            Log::error('Token inválido o usuario no autenticado: ' . $e->getMessage());
-            return response()->json(['error' => 'Usuario no autenticado'], 401);
-        }
+    try {
+        $user = JWTAuth::setToken($token)->authenticate();
+    } catch (\Exception $e) {
+        Log::error('Token inválido o usuario no autenticado: ' . $e->getMessage());
+        return response()->json(['error' => 'Usuario no autenticado'], 401);
+    }
 
-        // 🚫 Validar rol: solo ADMIN o usuario dueño de la reserva
-        if ($user->rol !== 'ADMIN' && $user->id !== (int)$clienteId) {
-            return response()->json(['error' => 'No autorizado'], 403);
-        }
+    // 🚫 Validar rol: solo ADMIN o usuario dueño de la reserva
+    if ($user->rol !== 'ADMIN' && $user->id !== (int)$clienteId) {
+        return response()->json(['error' => 'No autorizado'], 403);
+    }
 
-        // Buscar reserva y cliente
-        $reserva = Reserva::with('paquete')->find($reservaId);
-        $cliente = Cliente::find($clienteId);
+    // Buscar reserva (con paquete y participantes) y cliente
+    $reserva = Reserva::with(['paquete', 'participantes'])->find($reservaId);
+    $cliente = Cliente::find($clienteId);
 
-        if (!$reserva || !$cliente) {
-            return response()->json(['error' => 'Reserva o cliente no encontrados'], 404);
-        }
+    if (!$reserva || !$cliente) {
+        return response()->json(['error' => 'Reserva o cliente no encontrados'], 404);
+    }
 
-        // Detectar si es un viaje personalizado
-        $esPersonalizado = $reserva->paquete_id == 0;
+    // Detectar si es un viaje personalizado
+    $esPersonalizado = $reserva->paquete_id == 0;
 
-        // Nombre del viaje
+    // Nombre del viaje
+    $nombrePaquete = $esPersonalizado
+        ? ($reserva->destino ?: 'Destino personalizado')
+        : ($reserva->paquete ? $reserva->paquete->nombre : 'Paquete no asociado');
 
-        $nombrePaquete = $esPersonalizado
-            ? ($reserva->destino ?: 'Destino personalizado')
-            : ($reserva->paquete ? $reserva->paquete->nombre : 'Paquete no asociado');
+    // Fecha reserva
+    $fechaReservaFormatted = $reserva->fecha_reserva
+        ? date('d/m/Y', strtotime($reserva->fecha_reserva))
+        : 'No disponible';
 
-        // Fecha reserva
-        $fechaReservaFormatted = $reserva->fecha_reserva
-            ? date('d/m/Y', strtotime($reserva->fecha_reserva))
+    // Fechas inicio y fin
+    if ($esPersonalizado) {
+
+        $fechaInicioFormatted = !empty($reserva->fecha_inicio)
+            ? date('d/m/Y', strtotime($reserva->fecha_inicio))
             : 'No disponible';
 
-        // Fechas inicio y fin
-        if ($esPersonalizado) {
+        $fechaFinFormatted = !empty($reserva->fecha_fin)
+            ? date('d/m/Y', strtotime($reserva->fecha_fin))
+            : 'No disponible';
+    } else {
 
-            $fechaInicioFormatted = !empty($reserva->fecha_inicio)
-                ? date('d/m/Y', strtotime($reserva->fecha_inicio))
-                : 'No disponible';
+        $fechaInicioFormatted = $reserva->paquete && $reserva->paquete->fecha_inicio
+            ? date('d/m/Y', strtotime($reserva->paquete->fecha_inicio))
+            : 'No disponible';
 
-            $fechaFinFormatted = !empty($reserva->fecha_fin)
-                ? date('d/m/Y', strtotime($reserva->fecha_fin))
-                : 'No disponible';
-        } else {
+        $fechaFinFormatted = $reserva->paquete && $reserva->paquete->fecha_fin
+            ? date('d/m/Y', strtotime($reserva->paquete->fecha_fin))
+            : 'No disponible';
+    }
 
-            $fechaInicioFormatted = $reserva->paquete && $reserva->paquete->fecha_inicio
-                ? date('d/m/Y', strtotime($reserva->paquete->fecha_inicio))
-                : 'No disponible';
+    // 🧩 SERVICIOS INCLUIDOS
+    if ($esPersonalizado) {
 
-            $fechaFinFormatted = $reserva->paquete && $reserva->paquete->fecha_fin
-                ? date('d/m/Y', strtotime($reserva->paquete->fecha_fin))
-                : 'No disponible';
-        }
+        $servicios = DB::table('incluye_personalizados')
+            ->where('reserva_id', $reservaId)
+            ->get();
+    } else {
 
-        // 🧩 SERVICIOS INCLUIDOS
-        if ($esPersonalizado) {
+        $servicios = DB::table('incluye')
+            ->where('paquete_id', $reserva->paquete_id)
+            ->get()
+            ->map(function ($item) {
+                $decoded = json_decode($item->descripcion, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    $item->descripcion = $decoded['descripcion'] ?? $item->descripcion;
+                    $item->precio = $decoded['precio'] ?? 0;
+                }
+                return $item;
+            });
+    }
 
-            $servicios = DB::table('incluye_personalizados')
-                ->where('reserva_id', $reservaId)
-                ->get();
-        } else {
+    $tipoPago = $reserva->metodo_pago ?? 'No disponible';
+    $numCuotas = $reserva->num_cuotas ?? 'N/A';
+    $importeCuotas = $reserva->importe_cuotas ?? 'N/A';
+    $plazas = $reserva->num_personas ?? 'N/A';
 
-            $servicios = DB::table('incluye')
-                ->where('paquete_id', $reserva->paquete_id)
-                ->get()
-                ->map(function ($item) {
-                    $decoded = json_decode($item->descripcion, true);
-                    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-                        $item->descripcion = $decoded['descripcion'] ?? $item->descripcion;
-                        $item->precio = $decoded['precio'] ?? 0;
-                    }
-                    return $item;
-                });
-        }
+    $ivaRate = 0.21;
+    $precioTotal = $reserva->total_precio ?? 0;
+    $baseImponible = $precioTotal > 0 ? round($precioTotal / (1 + $ivaRate), 2) : 0;
+    $iva = $precioTotal > 0 ? round($precioTotal - $baseImponible, 2) : 0;
 
-        $tipoPago = $reserva->metodo_pago ?? 'No disponible';
-        $numCuotas = $reserva->num_cuotas ?? 'N/A';
-        $importeCuotas = $reserva->importe_cuotas ?? 'N/A';
-        $plazas = $reserva->num_personas ?? 'N/A';
+    $baseImponibleFormatted = number_format($baseImponible, 2, ',', '.');
+    $ivaFormatted = number_format($iva, 2, ',', '.');
+    $totalPrecio = number_format($precioTotal, 2, ',', '.');
 
-        $ivaRate = 0.21;
-        $precioTotal = $reserva->total_precio ?? 0;
-        $baseImponible = $precioTotal > 0 ? round($precioTotal / (1 + $ivaRate), 2) : 0;
-        $iva = $precioTotal > 0 ? round($precioTotal - $baseImponible, 2) : 0;
+    // ✅ Participantes es una RELACIÓN (Collection de modelos), no un array
+    $participantes = $reserva->participantes;
 
-        $baseImponibleFormatted = number_format($baseImponible, 2, ',', '.');
-        $ivaFormatted = number_format($iva, 2, ',', '.');
-        $totalPrecio = number_format($precioTotal, 2, ',', '.');
+    $importeAlojamiento = (float) ($reserva->importe_alojamiento ?? 0);
+    $impuestoMunicipal  = (float) ($reserva->impuesto_municipal ?? 0);
 
-        $participantes = $reserva->participantes ?? [];
+    // Manejo seguro del logo
+    $logoPath = public_path('images/logo_factura_negro.png');
+    if (file_exists($logoPath)) {
+        $logoBase64 = base64_encode(file_get_contents($logoPath));
+        $logoSrc = 'data:image/png;base64,' . $logoBase64;
+    } else {
+        $logoSrc = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMB/eeFmjAAAAAASUVORK5CYII=';
+    }
 
-        // Manejo seguro del logo
-        $logoPath = public_path('images/logo_factura_negro.png');
-        if (file_exists($logoPath)) {
-            $logoBase64 = base64_encode(file_get_contents($logoPath));
-            $logoSrc = 'data:image/png;base64,' . $logoBase64;
-        } else {
-            // Placeholder si no existe
-            $logoSrc = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMB/eeFmjAAAAAASUVORK5CYII=';
-        }
+    $subtotal = $totalPrecio;
 
-        $precioUnitario = $servicios->sum(function ($servicio) {
-            return isset($servicio->precio) ? (float) $servicio->precio : 0;
-        });
-        $subtotal = $precioTotal;
-
-        // HTML del PDF (igual a mostrarNombrePorLog)
-        $htmlPdf = "
+    // HTML del PDF (igual al del email)
+    $htmlPdf = "
 <html>
 <head>
     <style>
@@ -204,10 +203,6 @@ class FacturasController extends Controller
             <tr>
                 <td style='width:30%; vertical-align:middle;'><img src='{$logoSrc}' alt='Logo Empresa' style='height:100px; border-radius:6px;'></td>
                 <td style='width:70%; vertical-align:middle; text-align:right;'>
-                    <div style='background-color:#000000; color:#fff; padding:5px 15px; border-radius:6px; display:inline-block; margin-bottom:10px;'>
-                        <div style='font-size:10px; opacity:0.9;'>FACTURA Nº</div>
-                        <div style='font-size:18px; font-weight:bold;'>{$reservaId}</div>
-                    </div>
                     <div style='font-size:11px; color:#000000; text-align:right;'><strong>Fecha de emisión:</strong><br>" . date('d/m/Y') . "</div>
                 </td>
             </tr>
@@ -276,11 +271,12 @@ class FacturasController extends Controller
                     </tr>
                 </thead>
                 <tbody>";
+    if ($participantes && $participantes->count() > 0) {
         foreach ($participantes as $p) {
-            $dni = $p['dni'] ?? 'N/A';
-            $nombreP = $p['nombre'] ?? 'Nombre no disponible';
-            $apellidosP = $p['apellidos'] ?? '';
-            $emailP = $p['email'] ?? 'Email no disponible';
+            $nombreP    = $p->nombre ?? 'Nombre no disponible';
+            $apellidosP = $p->apellidos ?? '';
+            $dni        = $p->dni ?? 'N/A';
+            $emailP     = $p->email ?? 'Email no disponible';
             $htmlPdf .= "
                     <tr style='background-color:#f5f5f5;'>
                         <td style='padding:12px; border-bottom:1px solid rgba(138,119,90,0.2);'>{$nombreP}</td>
@@ -289,8 +285,14 @@ class FacturasController extends Controller
                         <td style='padding:12px; border-bottom:1px solid rgba(138,119,90,0.2);'>{$emailP}</td>
                     </tr>";
         }
-
+    } else {
         $htmlPdf .= "
+                    <tr>
+                        <td colspan='4' style='padding:15px 12px; text-align:center; color:#888;'>No hay viajeros registrados.</td>
+                    </tr>";
+    }
+
+    $htmlPdf .= "
                 </tbody>
             </table>
         </div>
@@ -322,9 +324,9 @@ class FacturasController extends Controller
                     </tr>
                     " : collect($servicios)->map(function ($servicio, $index) {
 
-            $bg = $index % 2 === 0 ? '#ffffff' : '#f5f5f5';
+        $bg = $index % 2 === 0 ? '#ffffff' : '#f5f5f5';
 
-            return "
+        return "
                         <tr style='background-color:{$bg};'>
                             <td style='padding:15px 12px; border-bottom:1px solid rgba(138,119,90,0.2);'>
                                 {$servicio->descripcion}
@@ -334,16 +336,21 @@ class FacturasController extends Controller
                                 " . number_format($servicio->precio ?? 0, 2, ',', '.') . " €
                             </td>
                         </tr>";
-        })->implode('')) . "
+    })->implode('')) . "
                 </tbody>
             </table>
         </div>
 
         <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>
-            Gastos de gestión: 10%
+            Gastos de gestión incluidos.
         </h5>
-        
-        <!-- Tabla de conceptos -->
+        <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>
+            Importe a pagar en el alojamiento: " . number_format($importeAlojamiento, 2, ',', '.') . " €
+        </h5>
+        <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>
+            Impuesto municipal: " . number_format($impuestoMunicipal, 2, ',', '.') . " €
+        </h5>
+
         <!-- Experiencia -->
         <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>Experiencia</h3>
         <div style='margin-bottom:30px;'>
@@ -393,24 +400,20 @@ class FacturasController extends Controller
             <div style='clear:both;'></div>
         </div>
 
-            <!-- Footer -->
+        <!-- Footer -->
         <div style='margin-top:40px; padding-top:20px; border-top:2px solid #000000; font-size:11px; color:#000000; text-align:center;'>
             <p style='margin:0 0 5px 0;'><strong>Gracias por confiar en Atalanta</strong></p>
             <p style='margin:0; opacity:0.8;'>Esta factura ha sido generada electrónicamente y es válida sin firma ni sello.</p>
             <p style='margin:5px 0 0 0; opacity:0.8;'>Para cualquier consulta, contacte con nosotros en info@viajesatalanta.com o llame al +34 614 892 722</p>
         </div>
-        </div>
-    </body>
-    </html>";
+    </div>
+</body>
+</html>";
 
-        $pdf = PDF::loadHTML($htmlPdf)->setPaper('A4');
+    $pdf = PDF::loadHTML($htmlPdf)->setPaper('A4');
 
-        // Para descargar el PDF directamente:
-        return $pdf->download("factura_reserva_{$reservaId}.pdf");
-
-        // Si quieres enviarlo inline para visualizar en navegador:
-        // return $pdf->stream("factura_reserva_{$reservaId}.pdf");
-    }
+    return $pdf->download("factura_reserva_{$reservaId}.pdf");
+}
 
     public function index()
     {
@@ -555,11 +558,6 @@ class FacturasController extends Controller
             padding:10px;
             border-radius:8px;'></td>
             <td width='70%' style='text-align:right'>
-            <div style='background:#000000;color:#fff;padding:6px 15px;border-radius:6px;display:inline-block'>
-            <div style='font-size:10px'>FACTURA Nº</div>
-            <div style='font-size:18px;font-weight:bold'>{$factura->id}</div>
-            </div>
-            <br>
             <span style='font-size:11px;color:#000000'><strong>Fecha:</strong> {$fechaFactura}</span>
             </td>
             </tr>
