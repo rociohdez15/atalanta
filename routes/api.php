@@ -175,6 +175,7 @@ Route::put('/mapa/{id}', [PaqueteTuristicoController::class, 'editarPuntoMapa'])
 Route::post('/paquetes/{id}/itinerario', [PaqueteTuristicoController::class, 'agregarItinerario'])->middleware('admin');
 Route::delete('/itinerario/{id}', [PaqueteTuristicoController::class, 'eliminarItinerario'])->middleware('admin');
 Route::put('/itinerario/{id}', [PaqueteTuristicoController::class, 'editarItinerario'])->middleware('admin');
+Route::get('/paquetes/{id}/itinerario-pdf', [PaqueteTuristicoController::class, 'descargarItinerario']);
 
 //Blog
 Route::get('/blogger', [BlogController::class, 'index']);

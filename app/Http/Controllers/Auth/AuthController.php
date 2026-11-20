@@ -19,89 +19,110 @@ use Tymon\JWTAuth\Exceptions\JWTException;
 
 class AuthController extends Controller
 {
-    public function login(Request $request)
+
+    private function makeCookie(string $name, string $value, int $minutes)
     {
-        $credentials = $request->only(['email', 'password']);
-        $user = \App\Models\User::where('email', $credentials['email'])->first();
+        return cookie($name, $value, $minutes, null, null, true, true, false, 'Strict');
+    }
 
-        if (!$user) {
-            return response()->json(['error' => 'La cuenta con la que intentas iniciar sesión no existe.'], 404);
-        }
+    private function userPayload(User $user): array
+    {
+        return [
+            'id'    => $user->id,
+            'name'  => $user->name,
+            'email' => $user->email,
+            'rol'   => $user->rol,
+        ];
+    }
 
-        if (!$token = auth('api')->attempt($credentials)) {
-            return response()->json(['error' => 'La contraseña es incorrecta.'], 401);
-        }
-
-        // Actualizar la última conexión
-        $user->ultima_conexion = now();
-        $user->save();
-
-
+    /** Emite la sesión completa (access token + refresh opcional). */
+    private function startSession(User $user, bool $remember)
+    {
         JWTAuth::factory()->setTTL(60);
 
-        // Cookies HttpOnly
-        $cookieAccess = cookie('access_token', $token, 60, null, null, true, true, false, 'Strict');
+        $token = JWTAuth::fromUser($user);
 
+        $user->ultima_conexion = now();
 
-        $cookieRefresh = null;
-        if ($request->input('remember', false)) {
-            // Generar refresh token para "remember me" (7 días)
-            $refreshToken = Str::random(64);
+        $refreshToken = null;
+
+        if ($remember) {
+            $refreshToken        = Str::random(64);
             $user->refresh_token = hash('sha256', $refreshToken);
-            $user->save();
-
-            $cookieRefresh = cookie('refresh_token', $refreshToken, 60 * 24 * 7, null, null, true, true, false, 'Strict');
+        } else {
+            $user->refresh_token = null;
         }
 
-        $response = response()->json([
-            'rol' => $user->rol ?? 'USER',
-            'user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-            ]
-        ])->cookie($cookieAccess);
+        $user->save();
 
-        if ($cookieRefresh) {
-            $response->withCookie($cookieRefresh);
+        $response = response()->json([
+            'rol'  => $user->rol ?? 'USER',
+            'user' => $this->userPayload($user),
+        ]);
+
+        $response = $response->withCookie(
+            $this->makeCookie('access_token', $token, 60)
+        );
+
+        if ($refreshToken !== null) {
+            $response = $response->withCookie(
+                $this->makeCookie('refresh_token', $refreshToken, 60 * 24 * 7)
+            );
         }
 
         return $response;
     }
 
 
+    public function login(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email'    => 'required|string|email',
+            'password' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Credenciales incorrectas.'], 422);
+        }
+
+        $user = User::where('email', $request->input('email'))->first();
+
+        if (!$user || !Hash::check($request->input('password'), $user->password)) {
+            return response()->json(['error' => 'Credenciales incorrectas.'], 401);
+        }
+
+        // Dominio principal -> solo clientes. Subdominio admin -> solo admins.
+        $esAdmin     = strtoupper((string) $user->rol) === 'ADMIN';
+        $enHostAdmin = $request->getHost() === config('app.admin_host');
+
+        if ($esAdmin !== $enHostAdmin) {
+            // Mismo mensaje genérico para no revelar el tipo de cuenta
+            return response()->json(['error' => 'Credenciales incorrectas.'], 401);
+        }
+
+        return $this->startSession($user, $request->boolean('remember', false));
+    }
+
     public function me(Request $request)
     {
-        // Leer token de la cookie HttpOnly
         $token = $request->cookie('access_token');
 
         if (!$token) {
-            // ❌ No hay token → 401
             return response()->json(['message' => 'No autenticado'], 401);
         }
 
         try {
-            // Autenticar usuario con el token
             $user = JWTAuth::setToken($token)->authenticate();
 
             if (!$user) {
                 return response()->json(['message' => 'Usuario no encontrado'], 401);
             }
 
-            return response()->json([
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'rol' => $user->rol,
-                ],
-            ]);
+            return response()->json(['user' => $this->userPayload($user)]);
         } catch (JWTException $e) {
-            // Token inválido o expirado → 401
             return response()->json(['message' => 'Token inválido o expirado'], 401);
         }
     }
-
 
 
     public function register(Request $request)
@@ -271,9 +292,7 @@ class AuthController extends Controller
 
     public function olvidaste(Request $request)
     {
-        $request->validate([
-            'email' => 'required|email',
-        ]);
+        $request->validate(['email' => 'required|email']);
 
         $user = User::where('email', $request->email)->first();
 
@@ -282,7 +301,8 @@ class AuthController extends Controller
         }
 
         $nuevaContrasena = Str::random(10);
-        $user->password = Hash::make($nuevaContrasena);
+        $user->password      = Hash::make($nuevaContrasena);
+        $user->refresh_token = null; // cierra las sesiones "recordar" abiertas
         $user->save();
 
         Mail::to($user->email)->send(new NuevaContrasenaMail($user->name, $nuevaContrasena));
@@ -292,33 +312,24 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
+        // Si el token ya caducó o es inválido da igual:
+        // lo importante es SIEMPRE borrar las cookies y responder 200.
         try {
-            $token = $request->cookie('access_token');
-            $refreshToken = $request->cookie('refresh_token');
-
-            if ($token) {
-                JWTAuth::setToken($token)->invalidate(); // invalida el access token
+            if ($token = $request->cookie('access_token')) {
+                JWTAuth::setToken($token)->invalidate();
             }
-
-            // Limpiar refresh token en base de datos
-            if ($refreshToken) {
-                $user = User::where('refresh_token', hash('sha256', $refreshToken))->first();
-                if ($user) {
-                    $user->refresh_token = null;
-                    $user->save();
-                }
-            }
-
-            // Limpiar cookies
-            $cookieAccess = cookie()->forget('access_token');
-            $cookieRefresh = cookie()->forget('refresh_token');
-
-            return response()->json(['message' => 'Sesión cerrada correctamente'])
-                ->withCookie($cookieAccess)
-                ->withCookie($cookieRefresh);
-        } catch (\Exception $e) {
-            return response()->json(['error' => 'Error al cerrar sesión'], 500);
+        } catch (JWTException $e) {
+            // caducado / inválido / ya en blacklist: ignorar
         }
+
+        if ($refreshToken = $request->cookie('refresh_token')) {
+            User::where('refresh_token', hash('sha256', (string) $refreshToken))
+                ->update(['refresh_token' => null]);
+        }
+
+        return response()->json(['message' => 'Sesión cerrada correctamente'])
+            ->withCookie(cookie()->forget('access_token'))
+            ->withCookie(cookie()->forget('refresh_token'));
     }
 
 
@@ -326,40 +337,25 @@ class AuthController extends Controller
     {
         $refreshToken = $request->cookie('refresh_token');
 
-        if (!$refreshToken) {
+        if ($refreshToken === null || $refreshToken === '') {
             return response()->json(['error' => 'No autenticado'], 401);
         }
 
-        // Buscar usuario con refresh_token válido
-        $user = User::where('refresh_token', hash('sha256', $refreshToken))->first();
+        $user = User::where('refresh_token', hash('sha256', (string) $refreshToken))->first();
 
         if (!$user) {
-            return response()->json(['error' => 'Refresh token inválido'], 401);
+            // Borramos las cookies muertas para que el navegador no las siga enviando
+            return response()->json(['error' => 'Refresh token inválido'], 401)
+                ->withCookie(cookie()->forget('access_token'))
+                ->withCookie(cookie()->forget('refresh_token'));
         }
 
-        // Generar nuevo JWT (access token)
-        $token = auth('api')->login($user);
-        JWTAuth::factory()->setTTL(60); // 60 minutos
+        JWTAuth::factory()->setTTL(60);   // ANTES de generar el token
 
-        $cookieAccess = cookie(
-            'access_token',
-            $token,
-            60, // minutos
-            null,
-            null,
-            true,  // secure
-            true,  // httpOnly
-            false,
-            'Strict'
-        );
+        $token = JWTAuth::fromUser($user);
 
-        return response()->json([
-            'user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'rol' => $user->rol,
-            ],
-        ])->cookie($cookieAccess);
+        return response()
+            ->json(['user' => $this->userPayload($user)])
+            ->withCookie($this->makeCookie('access_token', $token, 60));
     }
 }

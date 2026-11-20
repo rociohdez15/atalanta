@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use App\Models\Incluye;
 use App\Models\PaqueteTuristico;
+use App\Models\PrecioPaquete;
 use Illuminate\Support\Facades\Log;
 use App\Models\MapaPunto;
 use App\Models\Itinerario;
@@ -16,14 +17,20 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\DB;
 
 
 class PaqueteTuristicoController extends Controller
 {
     // Obtener todos los paquetes turísticos paginados
+    // Obtener todos los paquetes turísticos paginados
     public function index(Request $request)
     {
         $query = PaqueteTuristico::query();
+
+        // Ofertas con stock limitado: aparecen aunque estén agotadas (SOLD OUT)
+        // y solo se muestran dentro de sus fechas.
+        $ofertasLimitadas = ['black_friday', 'cyber_monday'];
 
         // =========================================================
         // FILTRO POR CATEGORÍA
@@ -33,10 +40,7 @@ class PaqueteTuristicoController extends Controller
             $request->filled('tipo_viaje') &&
             $request->tipo_viaje !== 'todas'
         ) {
-            $query->where(
-                'tipo_viaje',
-                $request->tipo_viaje
-            );
+            $query->where('tipo_viaje', $request->tipo_viaje);
         }
 
         // =========================================================
@@ -52,22 +56,15 @@ class PaqueteTuristicoController extends Controller
             } elseif ($request->oferta !== 'todas') {
 
                 // Solo la oferta seleccionada
-                $query->where(
-                    'oferta',
-                    $request->oferta
-                );
+                $query->where('oferta', $request->oferta);
             }
         }
 
         // =========================================================
-        // FILTRAR BLACK FRIDAY SEGÚN SUS FECHAS
+        // FECHAS DE BLACK FRIDAY Y CYBER MONDAY
         // =========================================================
         //
-        // Si es Black Friday:
-        //
-        //   ahora >= oferta_inicio
-        //   Y
-        //   ahora <= oferta_fin
+        //   ahora >= oferta_inicio  Y  ahora <= oferta_fin
         //
         // Los demás paquetes siguen apareciendo normalmente.
         //
@@ -75,18 +72,18 @@ class PaqueteTuristicoController extends Controller
 
         $ahora = now();
 
-        $query->where(function ($q) use ($ahora) {
+        $query->where(function ($q) use ($ahora, $ofertasLimitadas) {
 
-            // Paquetes que NO son Black Friday
-            $q->where(function ($subQuery) {
+            // Paquetes que NO son Black Friday ni Cyber Monday
+            $q->where(function ($subQuery) use ($ofertasLimitadas) {
                 $subQuery->whereNull('oferta')
-                    ->orWhere('oferta', '!=', 'black_friday');
+                    ->orWhereNotIn('oferta', $ofertasLimitadas);
             })
 
-                // O Black Friday que esté actualmente activo
-                ->orWhere(function ($subQuery) use ($ahora) {
+                // O Black Friday / Cyber Monday actualmente activo
+                ->orWhere(function ($subQuery) use ($ahora, $ofertasLimitadas) {
                     $subQuery
-                        ->where('oferta', 'black_friday')
+                        ->whereIn('oferta', $ofertasLimitadas)
                         ->whereNotNull('oferta_inicio')
                         ->whereNotNull('oferta_fin')
                         ->where('oferta_inicio', '<=', $ahora)
@@ -101,19 +98,18 @@ class PaqueteTuristicoController extends Controller
         // Paquetes normales:
         //     plazas > 0
         //
-        // Black Friday:
-        //     también puede aparecer agotado para mostrar SOLD OUT
+        // Black Friday y Cyber Monday:
+        //     también aparecen agotados para mostrar SOLD OUT
         //
         // =========================================================
 
-        $query->where(function ($q) {
+        $query->where(function ($q) use ($ofertasLimitadas) {
 
             $q->where('plazas', '>', 0)
 
-                ->orWhere(function ($subQuery) {
-
+                ->orWhere(function ($subQuery) use ($ofertasLimitadas) {
                     $subQuery
-                        ->where('oferta', 'black_friday')
+                        ->whereIn('oferta', $ofertasLimitadas)
                         ->where('plazas', '<=', 0);
                 });
         });
@@ -208,7 +204,8 @@ class PaqueteTuristicoController extends Controller
     // Obtener un solo paquete por ID (opcional)
     public function show($id)
     {
-        $paquete = PaqueteTuristico::find($id);
+        // 'precios' ya incluye habitaciones_totales y habitaciones_disponibles
+        $paquete = PaqueteTuristico::with('precios')->find($id);
 
         if (!$paquete) {
             return response()->json(['message' => 'Paquete no encontrado'], 404);
@@ -239,7 +236,7 @@ class PaqueteTuristicoController extends Controller
     {
         $itinerarios = Itinerario::where('paquete_turistico_id', $id)
             ->orderBy('dia')
-            ->get(['dia', 'descripcion']);
+            ->get(['dia', 'descripcion', 'fecha']);
 
         return response()->json($itinerarios);
     }
@@ -277,6 +274,9 @@ class PaqueteTuristicoController extends Controller
                 'plazas' => 'required|integer',
                 'foto' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:10240',
 
+                // PDF DEL ITINERARIO
+                'pdf_itinerario' => 'nullable|file|mimes:pdf|max:10240',
+
                 // OFERTA
                 'oferta' => 'nullable|in:navidad,verano,san_valentin,black_friday,cyber_monday,bajada_precio',
                 'oferta_inicio' => 'nullable|date|required_with:oferta',
@@ -307,12 +307,15 @@ class PaqueteTuristicoController extends Controller
                 ? $request->oferta_fin
                 : null;
 
-            // Procesar imagen nueva si existe
+            /*
+            |--------------------------------------------------------------------------
+            | FOTO DE PORTADA
+            |--------------------------------------------------------------------------
+            */
             if ($request->hasFile('foto')) {
 
                 if ($paquete->foto) {
-                    $rutaAnterior =
-                        "public/paquetes/portada/{$paquete->id}/{$paquete->foto}";
+                    $rutaAnterior = "public/paquetes/portada/{$paquete->id}/{$paquete->foto}";
 
                     if (Storage::exists($rutaAnterior)) {
                         Storage::delete($rutaAnterior);
@@ -321,17 +324,56 @@ class PaqueteTuristicoController extends Controller
 
                 $imagen = $request->file('foto');
 
-                $nombreImagen =
-                    Str::random(20) .
-                    '.' .
-                    $imagen->getClientOriginalExtension();
+                $folderPathFoto = 'public/paquetes/portada/' . $paquete->id;
 
-                $imagen->storeAs(
-                    "public/paquetes/portada/{$paquete->id}",
-                    $nombreImagen
-                );
+                if (!Storage::exists($folderPathFoto)) {
+                    Storage::makeDirectory($folderPathFoto, 0775, true);
+                    @chmod(storage_path('app/' . $folderPathFoto), 0775);
+                }
+
+                $nombreImagen = Str::random(20) . '.' . $imagen->getClientOriginalExtension();
+
+                $imagen->storeAs($folderPathFoto, $nombreImagen);
+
+                $fullImagenPath = storage_path('app/' . $folderPathFoto . '/' . $nombreImagen);
+                @chmod($fullImagenPath, 0644);
 
                 $paquete->foto = $nombreImagen;
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | PDF DEL ITINERARIO
+            |--------------------------------------------------------------------------
+            */
+            if ($request->hasFile('pdf_itinerario')) {
+
+                // Borrar el PDF anterior, si había uno
+                if ($paquete->pdf_itinerario) {
+                    $rutaPdfAnterior = "public/paquetes/itinerario/{$paquete->id}/{$paquete->pdf_itinerario}";
+
+                    if (Storage::exists($rutaPdfAnterior)) {
+                        Storage::delete($rutaPdfAnterior);
+                    }
+                }
+
+                $pdf = $request->file('pdf_itinerario');
+
+                $folderPathPdf = 'public/paquetes/itinerario/' . $paquete->id;
+
+                if (!Storage::exists($folderPathPdf)) {
+                    Storage::makeDirectory($folderPathPdf, 0775, true);
+                    @chmod(storage_path('app/' . $folderPathPdf), 0775);
+                }
+
+                $nombrePdf = Str::random(20) . '.' . $pdf->getClientOriginalExtension();
+
+                $pdf->storeAs($folderPathPdf, $nombrePdf);
+
+                $fullPdfPath = storage_path('app/' . $folderPathPdf . '/' . $nombrePdf);
+                @chmod($fullPdfPath, 0644);
+
+                $paquete->pdf_itinerario = $nombrePdf;
             }
 
             $paquete->save();
@@ -354,6 +396,72 @@ class PaqueteTuristicoController extends Controller
             ], 500);
         }
     }
+
+    // =========================================================
+    // ACTUALIZAR STOCK DE HABITACIONES
+    // =========================================================
+    //
+    // Cambia el total de habitaciones de un tipo conservando las
+    // que ya están reservadas:
+    //
+    //   reservadas  = totales_antiguos - disponibles_antiguas
+    //   disponibles = max(0, totales_nuevos - reservadas)
+    //
+    // Si se envía null, el tipo pasa a "sin límite".
+    //
+    public function actualizarHabitaciones(Request $request, $precioId)
+    {
+        $data = $request->validate([
+            'habitaciones_totales' => 'nullable|integer|min:0|max:1000',
+        ]);
+
+        $precio = DB::transaction(function () use ($precioId, $data) {
+
+            $precio = PrecioPaquete::lockForUpdate()->findOrFail($precioId);
+
+            $nuevoTotal = $data['habitaciones_totales'] ?? null;
+
+            if ($nuevoTotal === null) {
+                $precio->habitaciones_totales = null;
+                $precio->habitaciones_disponibles = null;
+            } else {
+                $reservadas =
+                    ($precio->habitaciones_totales !== null &&
+                        $precio->habitaciones_disponibles !== null)
+                    ? $precio->habitaciones_totales - $precio->habitaciones_disponibles
+                    : 0;
+
+                $precio->habitaciones_totales = $nuevoTotal;
+                $precio->habitaciones_disponibles = max(0, $nuevoTotal - $reservadas);
+            }
+
+            $precio->save();
+
+            return $precio;
+        });
+
+        return response()->json($precio);
+    }
+
+    public function descargarItinerario($id)
+    {
+        $paquete = PaqueteTuristico::findOrFail($id);
+
+        if (!$paquete->pdf_itinerario) {
+            abort(404, 'Este paquete no tiene PDF de itinerario.');
+        }
+
+        $path = "public/paquetes/itinerario/{$paquete->id}/{$paquete->pdf_itinerario}";
+
+        if (!Storage::exists($path)) {
+            abort(404, 'El archivo no existe en el servidor.');
+        }
+
+        return Storage::download($path, $paquete->pdf_itinerario, [
+            'Content-Type' => 'application/pdf',
+        ]);
+    }
+
     // Eliminar paquete
     public function destroy($id)
     {
@@ -388,94 +496,483 @@ class PaqueteTuristicoController extends Controller
         return response()->json($paquetes);
     }
 
+
+
     public function agregar(Request $request)
     {
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDACIÓN
+        |--------------------------------------------------------------------------
+        */
+
         $validator = Validator::make($request->all(), [
+
+            // =====================================================
+            // PAQUETE
+            // =====================================================
+
             'nombre' => 'required|string|max:255',
+
+            'lugar' => 'required|string|max:255',
+
             'fecha_inicio' => 'required|date',
-            'fecha_fin' => 'required|date|after_or_equal:fecha_inicio',
-            'precio' => 'required|numeric|min:0',
+
+            'fecha_fin' => [
+                'required',
+                'date',
+                'after_or_equal:fecha_inicio',
+            ],
+
             'tipo_viaje' => 'required|string|max:255',
 
-            // ESTADO DEL PAQUETE
-            'estado' => 'required|in:proximamente,disponible',
-
-            // OFERTA / CAMPAÑA
-            'oferta' => 'nullable|in:navidad,verano,san_valentin,black_friday,cyber_monday,bajada_precio',
-            'oferta_inicio' => 'nullable|date|required_with:oferta',
-            'oferta_fin' => 'nullable|date|after:oferta_inicio|required_with:oferta',
+            'estado' => [
+                'required',
+                'in:proximamente,disponible',
+            ],
 
             'descripcion' => 'required|string',
-            'plazas' => 'required|integer|min:1',
-            'viajerosFijos' => 'nullable|integer|min:1|max:255',
-            'foto' => 'required|image|mimes:jpeg,png,jpg,gif|max:10240',
-            'galeria.*' => 'required|image|mimes:jpeg,png,jpg,gif|max:10240',
-            'galeria' => 'required|array|size:6',
 
-            'servicios_incluidos' => 'array',
-            'servicios_incluidos.*' => 'string',
+            'plazas' => [
+                'required',
+                'integer',
+                'min:1',
+            ],
 
-            'servicios_no_incluidos' => 'array',
-            'servicios_no_incluidos.*' => 'string',
+            'viajerosFijos' => [
+                'nullable',
+                'integer',
+                'min:1',
+                'max:255',
+            ],
 
-            'puntos_mapa' => 'required|array|min:1',
-            'puntos_mapa.*.latitud' => 'required|numeric|between:-90,90',
-            'puntos_mapa.*.longitud' => 'required|numeric|between:-180,180',
-            'puntos_mapa.*.nombre' => 'nullable|string|max:255',
-            'puntos_mapa.*.descripcion' => 'nullable|string|max:255',
+            // =====================================================
+            // OFERTA
+            // =====================================================
 
-            // Validación para el itinerario con fecha
-            'itinerario' => 'required|array|min:1',
-            'itinerario.*.dia' => 'required|string|max:255',
-            'itinerario.*.fecha' => 'required|date',
-            'itinerario.*.descripcion' => 'required|string',
+            'oferta' => [
+                'nullable',
+                'in:navidad,verano,san_valentin,black_friday,cyber_monday,bajada_precio',
+            ],
+
+            'oferta_inicio' => [
+                'nullable',
+                'date',
+                'required_with:oferta',
+            ],
+
+            'oferta_fin' => [
+                'nullable',
+                'date',
+                'after:oferta_inicio',
+                'required_with:oferta',
+            ],
+
+            // =====================================================
+            // IMÁGENES
+            // =====================================================
+
+            'foto' => [
+                'required',
+                'image',
+                'mimes:jpeg,png,jpg,gif',
+                'max:10240',
+            ],
+
+            'galeria' => [
+                'required',
+                'array',
+                'size:6',
+            ],
+
+            'galeria.*' => [
+                'required',
+                'image',
+                'mimes:jpeg,png,jpg,gif',
+                'max:10240',
+            ],
+
+            // =====================================================
+            // PDF DEL ITINERARIO
+            // =====================================================
+
+            'pdf_itinerario' => [
+                'nullable',
+                'file',
+                'mimes:pdf',
+                'max:10240',
+            ],
+
+            // =====================================================
+            // PRECIOS
+            // =====================================================
+
+            'precios' => [
+                'required',
+                'array',
+                'min:1',
+            ],
+
+            'precios.*.tipo_habitacion' => [
+                'required',
+                'string',
+                'max:50',
+            ],
+
+            'precios.*.capacidad' => [
+                'required',
+                'integer',
+                'min:1',
+                'max:20',
+            ],
+
+            'precios.*.precio' => [
+                'required',
+                'numeric',
+                'min:0',
+            ],
+
+            // Nº de habitaciones de este tipo
+            // (vacío / null = sin límite)
+            'precios.*.habitaciones_totales' => [
+                'nullable',
+                'integer',
+                'min:1',
+                'max:1000',
+            ],
+
+            // =====================================================
+            // SERVICIOS
+            // =====================================================
+
+            'servicios_incluidos' => [
+                'required',
+                'array',
+                'min:1',
+            ],
+
+            'servicios_incluidos.*' => [
+                'string',
+            ],
+
+            'servicios_no_incluidos' => [
+                'required',
+                'array',
+                'min:1',
+            ],
+
+            'servicios_no_incluidos.*' => [
+                'string',
+            ],
+
+            // =====================================================
+            // MAPA
+            // =====================================================
+
+            'puntos_mapa' => [
+                'required',
+                'array',
+                'min:1',
+            ],
+
+            'puntos_mapa.*.latitud' => [
+                'required',
+                'numeric',
+                'between:-90,90',
+            ],
+
+            'puntos_mapa.*.longitud' => [
+                'required',
+                'numeric',
+                'between:-180,180',
+            ],
+
+            'puntos_mapa.*.nombre' => [
+                'nullable',
+                'string',
+                'max:255',
+            ],
+
+            'puntos_mapa.*.descripcion' => [
+                'nullable',
+                'string',
+                'max:255',
+            ],
+
+            // =====================================================
+            // ITINERARIO
+            // =====================================================
+
+            'itinerario' => [
+                'required',
+                'array',
+                'min:1',
+            ],
+
+            // "dia" es texto libre: "1", "1 y 2", "1, 2 y 3"...
+            // (la columna `dia` de la tabla debe ser string/varchar)
+            'itinerario.*.dia' => [
+                'required',
+                'string',
+                'max:255',
+            ],
+
+            'itinerario.*.fecha' => [
+                'required',
+                'date',
+            ],
+
+            'itinerario.*.descripcion' => [
+                'required',
+                'string',
+            ],
         ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | ERRORES DE VALIDACIÓN
+        |--------------------------------------------------------------------------
+        */
 
         if ($validator->fails()) {
             return response()->json([
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
-        try {
-            $paquete = PaqueteTuristico::create([
-                'nombre' => $request->nombre,
-                'fecha_inicio' => $request->fecha_inicio,
-                'fecha_fin' => $request->fecha_fin,
-                'precio' => $request->precio,
-                'tipo_viaje' => $request->tipo_viaje,
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDACIONES ADICIONALES DE PRECIOS
+        |--------------------------------------------------------------------------
+        */
 
-                // ESTADO
+        $precios = $request->input('precios', []);
+
+        $combinaciones = [];
+
+        foreach ($precios as $index => $precio) {
+
+            $tipoHabitacion = strtolower(
+                trim($precio['tipo_habitacion'])
+            );
+
+            $capacidad = (int) $precio['capacidad'];
+
+            $clave = $tipoHabitacion . '_' . $capacidad;
+
+            /*
+            |--------------------------------------------------------------------------
+            | No permitir duplicados
+            |--------------------------------------------------------------------------
+            */
+
+            if (in_array($clave, $combinaciones, true)) {
+                return response()->json([
+                    'errors' => [
+                        "precios.$index.tipo_habitacion" => [
+                            'No puedes tener dos precios para el mismo tipo de habitación y la misma capacidad.'
+                        ],
+                    ],
+                ], 422);
+            }
+
+            $combinaciones[] = $clave;
+
+            /*
+            |--------------------------------------------------------------------------
+            | La capacidad debe coincidir con el tipo
+            |--------------------------------------------------------------------------
+            */
+
+            $capacidadesPermitidas = [
+                'individual' => 1,
+                'doble' => 2,
+                'triple' => 3,
+                'cuadruple' => 4,
+            ];
+
+            if (
+                isset($capacidadesPermitidas[$tipoHabitacion]) &&
+                $capacidad !==
+                $capacidadesPermitidas[$tipoHabitacion]
+            ) {
+                return response()->json([
+                    'errors' => [
+                        "precios.$index.capacidad" => [
+                            "La capacidad no coincide con el tipo de habitación."
+                        ],
+                    ],
+                ], 422);
+            }
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | VIAJEROS FIJOS
+        |--------------------------------------------------------------------------
+        */
+
+        if ($request->filled('viajerosFijos')) {
+
+            if (
+                (int) $request->viajerosFijos >
+                (int) $request->plazas
+            ) {
+                return response()->json([
+                    'errors' => [
+                        'viajerosFijos' => [
+                            'El número de viajeros fijos no puede ser mayor que las plazas totales.'
+                        ],
+                    ],
+                ], 422);
+            }
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | CREAR PAQUETE
+        |--------------------------------------------------------------------------
+        */
+
+        try {
+
+            DB::beginTransaction();
+
+            /*
+            |--------------------------------------------------------------------------
+            | Calcular precio "desde"
+            |--------------------------------------------------------------------------
+            */
+
+            $preciosPorPersona = collect($precios)
+                ->map(function ($precio) {
+                    return (float) $precio['precio'];
+                })
+                ->filter(function ($precio) {
+                    return $precio >= 0;
+                });
+
+            if ($preciosPorPersona->isEmpty()) {
+                DB::rollBack();
+
+                return response()->json([
+                    'errors' => [
+                        'precios' => [
+                            'Debe existir al menos un precio válido.'
+                        ],
+                    ],
+                ], 422);
+            }
+
+            $precioDesde = $preciosPorPersona->min();
+
+            /*
+            |--------------------------------------------------------------------------
+            | CREAR PAQUETE
+            |--------------------------------------------------------------------------
+            */
+
+            $paquete = PaqueteTuristico::create([
+                'nombre' => trim($request->nombre),
+
+                'fecha_inicio' => $request->fecha_inicio,
+
+                'fecha_fin' => $request->fecha_fin,
+
+                'precio' => $precioDesde,
+
+                'tipo_viaje' => trim($request->tipo_viaje),
+
                 'estado' => $request->estado,
 
-                // OFERTA
                 'oferta' => $request->oferta ?: null,
+
                 'oferta_inicio' => $request->oferta
                     ? $request->oferta_inicio
                     : null,
+
                 'oferta_fin' => $request->oferta
                     ? $request->oferta_fin
                     : null,
 
-                'descripcion' => $request->descripcion,
+                'descripcion' => trim(
+                    $request->descripcion
+                ),
+
                 'plazas' => $request->plazas,
-                'viajerosFijos' => $request->viajerosFijos,
-                'lugar' => $request->lugar,
+
+                'viajerosFijos' =>
+                $request->viajerosFijos,
+
+                'lugar' => trim($request->lugar),
+
                 'servicios' => 'null',
+
                 'numero_plazas' => $request->plazas,
             ]);
 
-            // Guardar imagen de portada
-            if ($request->hasFile('foto')) {
-                $file = $request->file('foto');
-                $folderPath = 'public/paquetes/portada/' . $paquete->id;
+            /*
+            |--------------------------------------------------------------------------
+            | GUARDAR PRECIOS (con stock de habitaciones)
+            |--------------------------------------------------------------------------
+            */
 
-                // Crear carpeta con permisos
+            foreach ($precios as $precio) {
+
+                // null = sin límite de habitaciones
+                $habitaciones =
+                    isset($precio['habitaciones_totales']) &&
+                    $precio['habitaciones_totales'] !== ''
+                    ? (int) $precio['habitaciones_totales']
+                    : null;
+
+                PrecioPaquete::create([
+                    'paquete_id' => $paquete->id,
+
+                    'tipo_habitacion' => strtolower(
+                        trim(
+                            $precio['tipo_habitacion']
+                        )
+                    ),
+
+                    'capacidad' =>
+                    (int) $precio['capacidad'],
+
+                    'precio' =>
+                    (float) $precio['precio'],
+
+                    // al crear, todas están disponibles
+                    'habitaciones_totales' => $habitaciones,
+                    'habitaciones_disponibles' => $habitaciones,
+                ]);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | FOTO DE PORTADA
+            |--------------------------------------------------------------------------
+            */
+
+            if ($request->hasFile('foto')) {
+
+                $file = $request->file('foto');
+
+                $folderPath =
+                    'public/paquetes/portada/' .
+                    $paquete->id;
+
                 if (!Storage::exists($folderPath)) {
-                    Storage::makeDirectory($folderPath, 0775, true);
+
+                    Storage::makeDirectory(
+                        $folderPath,
+                        0775,
+                        true
+                    );
 
                     @chmod(
-                        storage_path('app/' . $folderPath),
+                        storage_path(
+                            'app/' . $folderPath
+                        ),
                         0775
                     );
                 }
@@ -485,47 +982,126 @@ class PaqueteTuristicoController extends Controller
                     '.' .
                     $file->getClientOriginalExtension();
 
-                // Guardar archivo
-                $file->storeAs($folderPath, $filename);
-
-                // Después de guardar: dar permisos correctos
-                $fullFilePath = storage_path(
-                    'app/' .
-                        $folderPath .
-                        '/' .
-                        $filename
+                $file->storeAs(
+                    $folderPath,
+                    $filename
                 );
 
-                @chmod($fullFilePath, 0644);
+                $fullFilePath =
+                    storage_path(
+                        'app/' .
+                            $folderPath .
+                            '/' .
+                            $filename
+                    );
+
+                @chmod(
+                    $fullFilePath,
+                    0644
+                );
 
                 $paquete->foto = $filename;
+
                 $paquete->save();
             }
 
-            // Guardar galería
+            /*
+            |--------------------------------------------------------------------------
+            | PDF DEL ITINERARIO
+            |--------------------------------------------------------------------------
+            */
+
+            if ($request->hasFile('pdf_itinerario')) {
+
+                $pdf = $request->file('pdf_itinerario');
+
+                $folderPathPdf =
+                    'public/paquetes/itinerario/' .
+                    $paquete->id;
+
+                if (!Storage::exists($folderPathPdf)) {
+
+                    Storage::makeDirectory(
+                        $folderPathPdf,
+                        0775,
+                        true
+                    );
+
+                    @chmod(
+                        storage_path(
+                            'app/' . $folderPathPdf
+                        ),
+                        0775
+                    );
+                }
+
+                $pdfFilename =
+                    uniqid() .
+                    '.' .
+                    $pdf->getClientOriginalExtension();
+
+                $pdf->storeAs(
+                    $folderPathPdf,
+                    $pdfFilename
+                );
+
+                $fullPdfPath =
+                    storage_path(
+                        'app/' .
+                            $folderPathPdf .
+                            '/' .
+                            $pdfFilename
+                    );
+
+                @chmod(
+                    $fullPdfPath,
+                    0644
+                );
+
+                $paquete->pdf_itinerario = $pdfFilename;
+
+                $paquete->save();
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | GALERÍA
+            |--------------------------------------------------------------------------
+            */
+
             if ($request->hasFile('galeria')) {
-                $galeriaFiles = $request->file('galeria');
+
+                $galeriaFiles =
+                    $request->file('galeria');
 
                 $galeriaFolder =
                     'paquetes/' .
                     $paquete->id .
                     '/images';
 
-                // Crear carpeta si no existe
-                if (!Storage::disk('public')->exists($galeriaFolder)) {
-                    Storage::disk('public')->makeDirectory(
-                        $galeriaFolder
-                    );
+                if (
+                    !Storage::disk('public')
+                        ->exists($galeriaFolder)
+                ) {
 
-                    chmod(
+                    Storage::disk('public')
+                        ->makeDirectory(
+                            $galeriaFolder
+                        );
+
+                    @chmod(
                         storage_path(
-                            'app/public/' . $galeriaFolder
+                            'app/public/' .
+                                $galeriaFolder
                         ),
-                        0777
+                        0775
                     );
                 }
 
-                foreach ($galeriaFiles as $index => $img) {
+                foreach (
+                    $galeriaFiles as $index => $img
+                ) {
+
                     $imageName =
                         ($index + 1) .
                         '_' .
@@ -533,25 +1109,23 @@ class PaqueteTuristicoController extends Controller
                         '.' .
                         $img->getClientOriginalExtension();
 
-                    // Guardar archivo
-                    Storage::disk('public')->putFileAs(
-                        $galeriaFolder,
-                        $img,
-                        $imageName
-                    );
+                    Storage::disk('public')
+                        ->putFileAs(
+                            $galeriaFolder,
+                            $img,
+                            $imageName
+                        );
 
-                    // Forzar permisos
-                    chmod(
+                    @chmod(
                         storage_path(
                             'app/public/' .
                                 $galeriaFolder .
                                 '/' .
                                 $imageName
                         ),
-                        0777
+                        0644
                     );
 
-                    // Guardar en BD la ruta pública
                     $publicUrl =
                         '/storage/' .
                         $galeriaFolder .
@@ -559,66 +1133,177 @@ class PaqueteTuristicoController extends Controller
                         $imageName;
 
                     GaleriaPaquete::create([
-                        'paquete_id' => $paquete->id,
-                        'ruta_imagen' => $publicUrl,
+                        'paquete_id' =>
+                        $paquete->id,
+
+                        'ruta_imagen' =>
+                        $publicUrl,
                     ]);
                 }
             }
 
-            // Guardar servicios incluidos
-            if ($request->has('servicios_incluidos')) {
+            /*
+            |--------------------------------------------------------------------------
+            | SERVICIOS INCLUIDOS
+            |--------------------------------------------------------------------------
+            */
+
+            if (
+                $request->has(
+                    'servicios_incluidos'
+                )
+            ) {
+
                 foreach (
                     $request->servicios_incluidos
                     as $servicio
                 ) {
-                    Incluye::create([
-                        'paquete_id' => $paquete->id,
-                        'descripcion' => $servicio,
-                    ]);
+
+                    $servicioData =
+                        json_decode(
+                            $servicio,
+                            true
+                        );
+
+                    if (
+                        is_array(
+                            $servicioData
+                        )
+                    ) {
+
+                        Incluye::create([
+                            'paquete_id' =>
+                            $paquete->id,
+
+                            'descripcion' =>
+                            $servicioData['descripcion'] ?? '',
+
+                            'precio' =>
+                            $servicioData['precio'] ?? 0,
+                        ]);
+                    }
                 }
             }
 
-            // Guardar servicios no incluidos
-            if ($request->has('servicios_no_incluidos')) {
+            /*
+            |--------------------------------------------------------------------------
+            | SERVICIOS NO INCLUIDOS
+            |--------------------------------------------------------------------------
+            */
+
+            if (
+                $request->has(
+                    'servicios_no_incluidos'
+                )
+            ) {
+
                 foreach (
                     $request->servicios_no_incluidos
                     as $servicio
                 ) {
+
                     NoIncluye::create([
-                        'paquete_id' => $paquete->id,
-                        'descripcion' => $servicio,
+                        'paquete_id' =>
+                        $paquete->id,
+
+                        'descripcion' =>
+                        trim($servicio),
                     ]);
                 }
             }
 
-            // Guardar puntos del mapa
-            foreach ($request->puntos_mapa as $punto) {
+            /*
+            |--------------------------------------------------------------------------
+            | PUNTOS DEL MAPA
+            |--------------------------------------------------------------------------
+            */
+
+            foreach (
+                $request->puntos_mapa as $punto
+            ) {
+
                 MapaPunto::create([
-                    'paquete_id' => $paquete->id,
-                    'latitud' => $punto['latitud'],
-                    'longitud' => $punto['longitud'],
-                    'nombre' => $punto['nombre'] ?? null,
-                    'descripcion' => $punto['descripcion'] ?? null,
+                    'paquete_id' =>
+                    $paquete->id,
+
+                    'latitud' =>
+                    $punto['latitud'],
+
+                    'longitud' =>
+                    $punto['longitud'],
+
+                    'nombre' =>
+                    $punto['nombre'] ?? null,
+
+                    'descripcion' =>
+                    $punto['descripcion'] ?? null,
                 ]);
             }
 
-            // Guardar itinerario con fecha
-            if ($request->has('itinerario')) {
-                foreach ($request->itinerario as $item) {
+            /*
+            |--------------------------------------------------------------------------
+            | ITINERARIO
+            |--------------------------------------------------------------------------
+            */
+
+            if (
+                $request->has('itinerario')
+            ) {
+
+                foreach (
+                    $request->itinerario as $item
+                ) {
+
                     Itinerario::create([
-                        'paquete_turistico_id' => $paquete->id,
-                        'dia' => $item['dia'],
-                        'fecha' => $item['fecha'],
-                        'descripcion' => $item['descripcion'],
+                        'paquete_turistico_id' =>
+                        $paquete->id,
+
+                        'dia' =>
+                        $item['dia'],
+
+                        'fecha' =>
+                        $item['fecha'],
+
+                        'descripcion' =>
+                        $item['descripcion'],
                     ]);
                 }
             }
 
+            /*
+            |--------------------------------------------------------------------------
+            | COMMIT
+            |--------------------------------------------------------------------------
+            */
+
+            DB::commit();
+
+            /*
+            |--------------------------------------------------------------------------
+            | RECARGAR RELACIONES
+            |--------------------------------------------------------------------------
+            */
+
+            $paquete->load([
+                'precios',
+                'imagenes',
+                'serviciosIncluidos',
+                'serviciosNoIncluidos',
+                'puntosMapa',
+                'itinerario',
+            ]);
+
             return response()->json([
-                'message' => 'Paquete creado correctamente',
-                'paquete' => $paquete,
+                'message' =>
+                'Paquete creado correctamente',
+
+                'paquete' =>
+                $paquete,
             ], 201);
         } catch (\Exception $e) {
+
+            DB::rollBack();
+
             Log::error(
                 'Error al crear paquete: ' .
                     $e->getMessage() .
@@ -629,8 +1314,11 @@ class PaqueteTuristicoController extends Controller
             );
 
             return response()->json([
-                'message' => 'Error al crear el paquete',
-                'error' => $e->getMessage(),
+                'message' =>
+                'Error al crear el paquete',
+
+                'error' =>
+                $e->getMessage(),
             ], 500);
         }
     }
@@ -694,6 +1382,7 @@ class PaqueteTuristicoController extends Controller
                 'itinerario' => $paquete->itinerario->map(fn($i) => [
                     'id' => $i->id,
                     'dia' => $i->dia,
+                    'fecha' => $i->fecha,
                     'descripcion' => $i->descripcion,
                 ]),
 
@@ -873,11 +1562,13 @@ class PaqueteTuristicoController extends Controller
     {
         $request->validate([
             'dia' => 'required|string|max:255',
+            'fecha' => 'required|date',
             'descripcion' => 'required|string',
         ]);
 
         $itinerario = Itinerario::findOrFail($id);
         $itinerario->dia = $request->dia;
+        $itinerario->fecha = $request->fecha;
         $itinerario->descripcion = $request->descripcion;
         $itinerario->save();
 

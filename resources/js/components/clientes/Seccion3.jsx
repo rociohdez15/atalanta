@@ -310,10 +310,26 @@ const Seccion3 = () => {
 
                                 const fechaFin = new Date(exp.fecha_fin);
 
-                                const duracionDias = Math.ceil(
-                                    (fechaFin - fechaInicio) /
-                                        (1000 * 60 * 60 * 24),
-                                );
+                                // ⭐ CORRECCIÓN CLAVE ⭐
+                                //
+                                // Antes: Math.ceil((fechaFin - fechaInicio) / 86400000)
+                                //
+                                // Eso cuenta el número de "saltos" entre las dos
+                                // fechas, no el número de días del viaje: del 20
+                                // al 22 de diciembre hay 2 saltos, pero el viaje
+                                // dura 3 días (20, 21 y 22 contando ambos
+                                // extremos). Faltaba sumar 1 para contar el día
+                                // de inicio.
+                                //
+                                // Se usa Math.round en vez de Math.ceil para
+                                // evitar que un pequeño desajuste de horas
+                                // (por ejemplo, por el huso horario del
+                                // servidor) redondee hacia arriba un día de más.
+                                const duracionDias =
+                                    Math.round(
+                                        (fechaFin - fechaInicio) /
+                                            (1000 * 60 * 60 * 24),
+                                    ) + 1;
 
                                 /*
                                  * Black Friday agotado.

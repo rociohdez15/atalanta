@@ -10,6 +10,7 @@ use App\Models\GaleriaPaquete;
 use App\Models\Incluye;
 use App\Models\NoIncluye;
 use App\Models\MapaPunto;
+use App\Models\PrecioPaquete;
 
 class PaqueteTuristico extends Model
 {
@@ -40,6 +41,12 @@ class PaqueteTuristico extends Model
         'oferta_fin',
         'estado',
     ];
+
+    /*
+    |--------------------------------------------------------------------------
+    | Relaciones
+    |--------------------------------------------------------------------------
+    */
 
     public function itinerario()
     {
@@ -81,13 +88,38 @@ class PaqueteTuristico extends Model
         return $this->hasMany(NoIncluye::class, 'paquete_id');
     }
 
+    /**
+     * Precios de las habitaciones del paquete.
+     *
+     * Ejemplo:
+     * - individual → 550 €
+     * - doble      → 800 €
+     * - triple     → 1050 €
+     */
+    public function precios()
+    {
+        return $this->hasMany(PrecioPaquete::class, 'paquete_id');
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Casts
+    |--------------------------------------------------------------------------
+    */
+
     protected $casts = [
         'fecha_inicio' => 'date',
         'fecha_fin' => 'date',
         'precio' => 'decimal:2',
     ];
 
-    // 💥 Eliminar todo al borrar un paquete
+    /*
+    |--------------------------------------------------------------------------
+    | Eventos del modelo
+    |--------------------------------------------------------------------------
+    */
+
+    // Eliminar relaciones asociadas al borrar un paquete.
     protected static function boot()
     {
         parent::boot();
@@ -98,6 +130,10 @@ class PaqueteTuristico extends Model
             $paquete->imagenes()->delete();
             $paquete->puntosMapa()->delete();
             $paquete->itinerario()->delete();
+
+            // Los precios no necesitan eliminarse aquí
+            // porque la FK de precios_paquetes utiliza
+            // ON DELETE CASCADE.
         });
     }
 }

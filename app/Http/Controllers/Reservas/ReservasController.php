@@ -292,7 +292,7 @@ class ReservasController extends Controller
         return response()->json(['message' => 'Participante eliminado correctamente.']);
     }
 
-    public function crearPersonalizada(Request $request)
+   public function crearPersonalizada(Request $request)
     {
         $request->validate([
             'cliente_id'     => 'required|exists:clientes,id',
@@ -312,41 +312,18 @@ class ReservasController extends Controller
 
             'vouchers.*' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
 
-            'importe_alojamiento' => 'nullable|numeric|min:0',
-            'impuesto_municipal'  => 'nullable|numeric|min:0',
-
-            // =========================
             // BLACK FRIDAY
-            // =========================
             'acepta_condiciones_black_friday' => 'nullable|boolean',
+
+            // NOTAS
+            'notas' => 'nullable|string|max:5000',
         ]);
 
-        // =========================
-        // PARSEO JSON (FormData)
-        // =========================
+        // PARSEO JSON
+        $itinerarioInput = json_decode($request->input('itinerario', '[]'), true) ?? [];
+        $serviciosInput = json_decode($request->input('servicios_incluidos', '[]'), true) ?? [];
 
-        $viajeros = json_decode(
-            $request->input('viajeros', '[]'),
-            true
-        ) ?? [];
-
-        $itinerarioInput = json_decode(
-            $request->input('itinerario', '[]'),
-            true
-        ) ?? [];
-
-        $serviciosInput = json_decode(
-            $request->input('servicios_incluidos', '[]'),
-            true
-        ) ?? [];
-
-        $importeAlojamiento = $request->input('importe_alojamiento');
-        $impuestoMunicipal  = $request->input('impuesto_municipal');
-
-        // =========================
         // PERSONALIZADO
-        // =========================
-
         $esPersonalizado =
             $request->input('personalizado') == true ||
             $request->input('personalizado') === '1' ||
@@ -355,15 +332,10 @@ class ReservasController extends Controller
         $paquete    = null;
         $precioBase = 0;
 
-        // =========================
         // PAQUETE NORMAL
-        // =========================
-
         if (!$esPersonalizado) {
 
-            $paquete = PaqueteTuristico::find(
-                $request->input('paquete_id')
-            );
+            $paquete = PaqueteTuristico::find($request->input('paquete_id'));
 
             if (!$paquete) {
                 return response()->json([
@@ -371,10 +343,7 @@ class ReservasController extends Controller
                 ], 404);
             }
 
-            if (
-                $paquete->plazas <
-                $request->input('num_personas')
-            ) {
+            if ($paquete->plazas < $request->input('num_personas')) {
                 return response()->json([
                     'message' => 'No hay plazas suficientes'
                 ], 422);
@@ -383,29 +352,9 @@ class ReservasController extends Controller
             $precioBase = $paquete->precio;
         }
 
-        // =========================
         // BLACK FRIDAY
-        // =========================
-
-        $esBlackFriday = $paquete
-            && $paquete->oferta === 'black_friday';
-
-        /*
-     * FormData envía normalmente:
-     *
-     * "1" -> true
-     * "0" -> false
-     *
-     * Laravel request->boolean() se encarga
-     * de convertirlo correctamente.
-     */
-        $aceptaBlackFriday = $request->boolean(
-            'acepta_condiciones_black_friday'
-        );
-
-        // =========================
-        // VALIDACIÓN BLACK FRIDAY
-        // =========================
+        $esBlackFriday = $paquete && $paquete->oferta === 'black_friday';
+        $aceptaBlackFriday = $request->boolean('acepta_condiciones_black_friday');
 
         if ($esBlackFriday && !$aceptaBlackFriday) {
             return response()->json([
@@ -413,167 +362,79 @@ class ReservasController extends Controller
             ], 422);
         }
 
-        // =========================
         // VOUCHERS
-        // =========================
-
         $vouchersAdjuntos = [];
 
         if ($request->hasFile('vouchers')) {
 
             foreach ($request->file('vouchers') as $file) {
 
-                $path = $file->store(
-                    'vouchers',
-                    'public'
-                );
+                $path = $file->store('vouchers', 'public');
 
                 $vouchersAdjuntos[] = [
-                    'path' => storage_path(
-                        'app/public/' . $path
-                    ),
+                    'path' => storage_path('app/public/' . $path),
                     'name' => $file->getClientOriginalName(),
                     'mime' => $file->getClientMimeType(),
                 ];
             }
         }
 
-        // =========================
         // RESERVA
-        // =========================
-
         $reserva = new Reserva();
 
         $reserva->reservation_token = Str::uuid();
+        $reserva->cliente_id = $request->input('cliente_id');
+        $reserva->paquete_id = $paquete ? $paquete->id : 0;
+        $reserva->num_personas = $request->input('num_personas');
+        $reserva->fecha_inicio = $request->input('fecha_inicio');
+        $reserva->fecha_fin = $request->input('fecha_fin');
+        $reserva->destino = $request->input('destino');
+        $reserva->fecha_pago = $request->input('fecha_pago');
+        $reserva->metodo_pago = $request->input('metodo_pago');
+        $reserva->descuento = $request->input('descuento') ?? 0;
 
-        $reserva->cliente_id =
-            $request->input('cliente_id');
-
-        $reserva->paquete_id =
-            $paquete ? $paquete->id : 0;
-
-        $reserva->num_personas =
-            $request->input('num_personas');
-
-        $reserva->fecha_inicio =
-            $request->input('fecha_inicio');
-
-        $reserva->fecha_fin =
-            $request->input('fecha_fin');
-
-        $reserva->destino =
-            $request->input('destino');
-
-        $reserva->fecha_pago =
-            $request->input('fecha_pago');
-
-        $reserva->metodo_pago =
-            $request->input('metodo_pago');
-
-        $reserva->descuento =
-            $request->input('descuento') ?? 0;
-
-        // =========================
-        // CONDICIONES BLACK FRIDAY
-        // =========================
-
-        /*
-     * Si el paquete es Black Friday:
-     *
-     * acepta_condiciones_black_friday = true
-     * condiciones_black_friday_aceptadas_at = fecha/hora actual
-     *
-     * Si no es Black Friday:
-     *
-     * acepta_condiciones_black_friday = false
-     * condiciones_black_friday_aceptadas_at = null
-     */
-
+        // BLACK FRIDAY
         $reserva->acepta_condiciones_black_friday =
-            $esBlackFriday
-            ? $aceptaBlackFriday
-            : false;
+            $esBlackFriday ? $aceptaBlackFriday : false;
 
         $reserva->condiciones_black_friday_aceptadas_at =
-            ($esBlackFriday && $aceptaBlackFriday)
-            ? now()
-            : null;
+            ($esBlackFriday && $aceptaBlackFriday) ? now() : null;
 
-        // =========================
         // RESTO DE DATOS
-        // =========================
+        $reserva->estado = $request->input('estado');
+        $reserva->fecha_reserva = $request->input('fecha_reserva');
+        $reserva->num_cuotas = $request->input('num_cuotas') ?? null;
+        $reserva->importe_cuotas = $request->input('importe_cuotas') ?? null;
 
-        $reserva->estado =
-            $request->input('estado');
+        // NOTAS
+        $reserva->notas = $request->input('notas') ?? null;
 
-        $reserva->fecha_reserva =
-            $request->input('fecha_reserva');
-
-        $reserva->num_cuotas =
-            $request->input('num_cuotas') ?? null;
-
-        $reserva->importe_cuotas =
-            $request->input('importe_cuotas') ?? null;
-
-        $reserva->importe_alojamiento =
-            $esPersonalizado
-            ? ($importeAlojamiento ?? null)
-            : null;
-
-        $reserva->impuesto_municipal =
-            $esPersonalizado
-            ? ($impuestoMunicipal ?? null)
-            : null;
-
-        // =========================
         // CALCULAR TOTAL
-        // =========================
-
         $total = $paquete
             ? $precioBase * $request->input('num_personas')
             : $request->input('total_precio');
 
         if ($reserva->descuento > 0) {
-            $total -= (
-                $total * $reserva->descuento
-            ) / 100;
+            $total -= ($total * $reserva->descuento) / 100;
         }
 
         $reserva->total_precio = $total;
-
         $reserva->save();
 
-        // =========================
         // GUARDAR VOUCHERS EN BD
-        // =========================
-
         if (!empty($vouchersAdjuntos)) {
 
             $rutasRelativas = array_map(
-                fn($v) => str_replace(
-                    storage_path('app/public/'),
-                    '',
-                    $v['path']
-                ),
+                fn($v) => str_replace(storage_path('app/public/'), '', $v['path']),
                 $vouchersAdjuntos
             );
 
-            $reserva->vouchers_hotel =
-                json_encode($rutasRelativas);
-
+            $reserva->vouchers_hotel = json_encode($rutasRelativas);
             $reserva->save();
         }
 
-        // =========================
         // SERVICIOS PERSONALIZADOS
-        // =========================
-
         if ($esPersonalizado && !empty($serviciosInput)) {
-
-            Log::info(
-                'SERVICIOS RECIBIDOS:',
-                $serviciosInput
-            );
 
             foreach ($serviciosInput as $servicio) {
 
@@ -587,24 +448,12 @@ class ReservasController extends Controller
             }
         }
 
-        // =========================
         // CLIENTE
-        // =========================
-
-        $cliente = Cliente::find(
-            $request->input('cliente_id')
-        );
-
-        $user = User::find(
-            $cliente->usuario_id
-        );
-
+        $cliente = Cliente::find($request->input('cliente_id'));
+        $user = User::find($cliente->usuario_id);
         $emailCliente = $user?->email;
 
-        // =========================
         // FACTURA
-        // =========================
-
         DB::table('facturas')->insert([
             'cliente_id'        => $cliente->id,
             'reserva_id'        => $reserva->id,
@@ -617,41 +466,12 @@ class ReservasController extends Controller
             'iva'               => 21,
             'telefono_empresa'  => '659633676',
             'email_empresa'     => 'info@viajesatalanta.com',
-            'detalles'          => 'Reserva de paquete turístico ID: ' .
-                ($paquete ? $paquete->id : 'personalizado'),
+            'detalles'          => 'Reserva de paquete turístico ID: ' . ($paquete ? $paquete->id : 'personalizado'),
             'created_at'        => now(),
             'updated_at'        => now(),
         ]);
 
-        // =========================
-        // VIAJEROS
-        // =========================
-
-        foreach ($viajeros as $p) {
-
-            DB::table('participantes')->insert([
-                'reserva_id'       => $reserva->id,
-                'nombre'           => $p['nombre'] ?? '',
-                'apellidos'        => $p['apellidos'] ?? '',
-                'email'            => $p['email'] ?? '',
-                'dni'              => $p['dni'] ?? '',
-                'telefono'         => $p['telefono'] ?? null,
-                'direccion'        => $p['direccion'] ?? null,
-                'ciudad'           => $p['ciudad'] ?? null,
-                'provincia'        => $p['provincia'] ?? null,
-                'fecha_nacimiento' => !empty($p['fecha_nacimiento'])
-                    ? $p['fecha_nacimiento']
-                    : null,
-                'experiencia'      => $p['experiencia'] ?? null,
-                'motivacion'       => $p['motivacion'] ?? null,
-                'info_relevante'   => $p['info_relevante'] ?? null,
-            ]);
-        }
-
-        // =========================
         // SERVICIOS INCLUIDOS
-        // =========================
-
         $serviciosIncluidos   = [];
         $serviciosNoIncluidos = [];
 
@@ -663,9 +483,7 @@ class ReservasController extends Controller
                 ->toArray();
         } else {
 
-            $serviciosIncluidos = DB::table(
-                'incluye_personalizados'
-            )
+            $serviciosIncluidos = DB::table('incluye_personalizados')
                 ->where('reserva_id', $reserva->id)
                 ->select('descripcion', 'precio')
                 ->get()
@@ -676,10 +494,7 @@ class ReservasController extends Controller
                 ->toArray();
         }
 
-        // =========================
         // SERVICIOS NO INCLUIDOS
-        // =========================
-
         if ($paquete) {
 
             $serviciosNoIncluidos = DB::table('no_incluye')
@@ -688,17 +503,9 @@ class ReservasController extends Controller
                 ->toArray();
         }
 
-        // =========================
         // DESCUENTOS
-        // =========================
-
         $descuentos = DB::table('descuentos')
-            ->select(
-                'titulo',
-                'codigo',
-                'descripcion',
-                'enlace'
-            )
+            ->select('titulo', 'codigo', 'descripcion', 'enlace')
             ->get()
             ->map(fn($d) => [
                 'titulo'      => $d->titulo,
@@ -708,61 +515,36 @@ class ReservasController extends Controller
             ])
             ->toArray();
 
-        // =========================
         // PLAZAS
-        // =========================
-
         if ($paquete) {
 
-            $paquete->plazas = max(
-                0,
-                $paquete->plazas -
-                    $request->input('num_personas')
-            );
-
+            $paquete->plazas = max(0, $paquete->plazas - $request->input('num_personas'));
             $paquete->save();
         }
 
-        // =========================
         // ITINERARIO
-        // =========================
-
         if (!empty($itinerarioInput)) {
 
             foreach ($itinerarioInput as $item) {
 
                 DB::table('itinerarios')->insert([
                     'reserva_id' => $reserva->id,
-
-                    'paquete_turistico_id' =>
-                    $paquete ? $paquete->id : 0,
-
-                    'dia' =>
-                    $item['dia'] ?? '',
-
-                    'fecha' =>
-                    $item['fecha'] ?? null,
-
-                    'descripcion' =>
-                    $item['descripcion'] ?? '',
+                    'paquete_turistico_id' => $paquete ? $paquete->id : 0,
+                    'dia' => $item['dia'] ?? '',
+                    'fecha' => $item['fecha'] ?? null,
+                    'descripcion' => $item['descripcion'] ?? '',
                 ]);
             }
         }
 
-        // =========================
         // CUOTAS
-        // =========================
-
         if (
             $request->input('metodo_pago') === 'parcial' &&
             (int)$request->input('num_cuotas') > 0
         ) {
 
-            $numCuotas =
-                (int)$request->input('num_cuotas');
-
-            $importe =
-                $request->input('importe_cuotas')
+            $numCuotas = (int)$request->input('num_cuotas');
+            $importe = $request->input('importe_cuotas')
                 ?: ($reserva->total_precio / $numCuotas);
 
             $fecha = Carbon::now();
@@ -774,46 +556,33 @@ class ReservasController extends Controller
                     'numero'     => $i,
                     'importe'    => $importe,
                     'pagada'     => $i === 1,
-                    'fecha_pago' => $i === 1
-                        ? $fecha
-                        : null,
+                    'fecha_pago' => $i === 1 ? $fecha : null,
                 ]);
 
                 if ($i > 1) {
 
-                    $fecha =
-                        $fecha->copy()
-                        ->addMonthNoOverflow();
+                    $fecha = $fecha->copy()->addMonthNoOverflow();
 
                     Evento::create([
-                        'nombre' =>
-                        "Pago cuota {$i}",
-
-                        'fecha' =>
-                        $fecha->format('Y-m-d'),
-
-                        'hora' =>
-                        '10:00',
+                        'nombre' => "Pago cuota {$i}",
+                        'fecha'  => $fecha->format('Y-m-d'),
+                        'hora'   => '10:00',
                     ]);
                 }
             }
         }
 
-        // =========================
         // EMAIL
-        // =========================
-
         $clienteArray = [
             'nombre'    => $cliente->nombre ?? '',
             'apellidos' => $cliente->apellidos ?? '',
             'dni'       => $cliente->dni ?? '',
             'direccion' => $cliente->direccion ?? '',
             'telefono'  => $cliente->telefono ?? '',
-            'email'     => $cliente->email ?? '',
+            'email'     => $emailCliente ?? $cliente->email ?? '',
         ];
 
-        $clienteNombreCompleto =
-            trim($cliente->nombre ?? '');
+        $clienteNombreCompleto = trim($cliente->nombre ?? '');
 
         $linkPagoCuotas =
             ($request->input('metodo_pago') === 'parcial')
@@ -826,147 +595,64 @@ class ReservasController extends Controller
             ->toArray();
 
         $fechaInicioFormatted = $paquete
-            ? (
-                $paquete->fecha_inicio
-                ? Carbon::parse(
-                    $paquete->fecha_inicio
-                )->format('d/m/Y')
-                : 'No disponible'
-            )
-            : (
-                $reserva->fecha_inicio
-                ? Carbon::parse(
-                    $reserva->fecha_inicio
-                )->format('d/m/Y')
-                : 'No disponible'
-            );
+            ? ($paquete->fecha_inicio
+                ? Carbon::parse($paquete->fecha_inicio)->format('d/m/Y')
+                : 'No disponible')
+            : ($reserva->fecha_inicio
+                ? Carbon::parse($reserva->fecha_inicio)->format('d/m/Y')
+                : 'No disponible');
 
         $fechaFinFormatted = $paquete
-            ? (
-                $paquete->fecha_fin
-                ? Carbon::parse(
-                    $paquete->fecha_fin
-                )->format('d/m/Y')
-                : 'No disponible'
-            )
-            : (
-                $reserva->fecha_fin
-                ? Carbon::parse(
-                    $reserva->fecha_fin
-                )->format('d/m/Y')
-                : 'No disponible'
-            );
+            ? ($paquete->fecha_fin
+                ? Carbon::parse($paquete->fecha_fin)->format('d/m/Y')
+                : 'No disponible')
+            : ($reserva->fecha_fin
+                ? Carbon::parse($reserva->fecha_fin)->format('d/m/Y')
+                : 'No disponible');
 
-        $importeAlojamiento =
-            $reserva->importe_alojamiento ?? null;
-
-        $impuestoMunicipal =
-            $reserva->impuesto_municipal ?? null;
-
-        // =========================
         // ENVIAR EMAIL
-        // =========================
-
         if ($emailCliente) {
 
             Mail::to($emailCliente)->send(
                 new ReservaConfirmacionMail(
-                    // 1. cliente
-                    $clienteArray,
-
-                    // 2. fechaReservaFormatted
-                    date('d/m/Y'),
-
-                    // 3. precioUnitario
-                    $precioBase,
-
-                    // 4. subtotal
-                    $reserva->total_precio,
-
-                    // 5. name
-                    $clienteNombreCompleto,
-
-                    // 6. tipoPago
-                    $request->input('metodo_pago'),
-
-                    // 7. numCuotas
-                    $request->input('num_cuotas') ?? 0,
-
-                    // 8. importeCuotas
-                    $request->input('importe_cuotas') ?? 0,
-
-                    // 9. plazas
-                    $request->input('num_personas'),
-
-                    // 10. totalPrecio
-                    $reserva->total_precio,
-
-                    // 11. destino
-                    $request->input('destino') ?? '',
-
-                    // 12. linkPagoCuotas
-                    $linkPagoCuotas,
-
-                    // 13. reserva
-                    $reserva,
-
-                    // 14. participantes
-                    $viajeros,
-
-                    // 15. paqueteNombre
+                    $clienteArray,                // 1
+                    date('d/m/Y'),                // 2
+                    $precioBase,                  // 3
+                    $reserva->total_precio,       // 4
+                    $clienteNombreCompleto,       // 5
+                    $request->input('metodo_pago'), // 6
+                    $request->input('num_cuotas') ?? 0, // 7
+                    $request->input('importe_cuotas') ?? 0, // 8
+                    $request->input('num_personas'), // 9
+                    $reserva->total_precio,       // 10
+                    $request->input('destino') ?? '', // 11
+                    $linkPagoCuotas,              // 12
+                    $reserva,                     // 13
+                    [],                           // 14 (viajeros: ya no se recogen)
                     $paquete
                         ? $paquete->nombre
-                        : ($request->input('destino') ?? 'Destino personalizado'),
-
-                    // 16. reservaId
-                    $reserva->id,
-
-                    // 17. clienteNombreCompleto
-                    $clienteNombreCompleto,
-
-                    // 18. fechaInicio
-                    $paquete
-                        ? $paquete->fecha_inicio
-                        : $reserva->fecha_inicio,
-
-                    // 19. fechaFin
-                    $paquete
-                        ? $paquete->fecha_fin
-                        : $reserva->fecha_fin,
-
-                    // 20. serviciosIncluidos
-                    $serviciosIncluidos,
-
-                    // 21. serviciosNoIncluidos
-                    $serviciosNoIncluidos,
-
-                    // 22. descuentos
-                    $descuentos,
-
-                    // 23. itinerario
-                    $itinerario,
-
-                    // 24. vouchers
-                    $vouchersAdjuntos,
-
-                    // 25. importeAlojamiento
-                    $importeAlojamiento,
-
-                    // 26. impuestoMunicipal
-                    $impuestoMunicipal
+                        : ($request->input('destino') ?? 'Destino personalizado'), // 15
+                    $reserva->id,                 // 16
+                    $clienteNombreCompleto,       // 17
+                    $paquete ? $paquete->fecha_inicio : $reserva->fecha_inicio, // 18
+                    $paquete ? $paquete->fecha_fin : $reserva->fecha_fin,       // 19
+                    $serviciosIncluidos,          // 20
+                    $serviciosNoIncluidos,        // 21
+                    $descuentos,                  // 22
+                    $itinerario,                  // 23
+                    $vouchersAdjuntos,            // 24
+                    $request->input('notas') ?? '' // 25
                 )
             );
         }
 
-        // =========================
         // RESPUESTA
-        // =========================
-
         return response()->json([
             'message' => 'Reserva creada correctamente',
             'reserva' => $reserva,
         ], 201);
     }
+
 
     public function reenviarConfirmacion($id)
     {

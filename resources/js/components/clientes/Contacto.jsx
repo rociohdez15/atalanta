@@ -206,7 +206,7 @@ const Contacto = () => {
                                                 left: "12px",
                                                 top: "75%",
                                                 transform: "translateY(-50%)",
-                                                color: "#877c4f",
+                                                color: "#000000",
                                                 pointerEvents: "none",
                                             }}
                                         />
@@ -244,7 +244,7 @@ const Contacto = () => {
                                                 left: "12px",
                                                 top: "75%",
                                                 transform: "translateY(-50%)",
-                                                color: "#877c4f",
+                                                color: "#000000",
                                                 pointerEvents: "none",
                                             }}
                                         />
@@ -282,7 +282,7 @@ const Contacto = () => {
                                                 left: "12px",
                                                 top: "35%",
                                                 transform: "translateY(-50%)",
-                                                color: "#877c4f",
+                                                color: "#000000",
                                                 pointerEvents: "none",
                                             }}
                                         />

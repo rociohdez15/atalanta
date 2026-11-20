@@ -39,8 +39,7 @@ class ReservaConfirmacionMail extends Mailable
     public $destino;
     public $itinerario;
     public $vouchers;
-    public $importeAlojamiento;
-    public $impuestoMunicipal;
+    public $notas;
 
     public function __construct(
         $cliente,
@@ -67,8 +66,7 @@ class ReservaConfirmacionMail extends Mailable
         $descuentos = [],
         $itinerario = [],
         $vouchers = [],
-        $importeAlojamiento = 0,
-        $impuestoMunicipal = 0
+        $notas = null
     ) {
         /*
         |--------------------------------------------------------------------------
@@ -111,7 +109,22 @@ class ReservaConfirmacionMail extends Mailable
 
         /*
         |--------------------------------------------------------------------------
-        | PARTICIPANTES
+        | NOTAS
+        |--------------------------------------------------------------------------
+        */
+
+        if ($notas === null && is_object($this->reserva)) {
+            $notas = $this->reserva->notas ?? null;
+        }
+
+        $this->notas = is_null($notas)
+            ? ''
+            : (string) $notas;
+
+        /*
+        |--------------------------------------------------------------------------
+        | PARTICIPANTES (ya no se usan en la factura; se mantiene el
+        | parámetro para no romper la firma del constructor)
         |--------------------------------------------------------------------------
         */
 
@@ -312,15 +325,6 @@ class ReservaConfirmacionMail extends Mailable
 
         /*
         |--------------------------------------------------------------------------
-        | IMPORTES ADICIONALES
-        |--------------------------------------------------------------------------
-        */
-
-        $this->importeAlojamiento = (float) ($importeAlojamiento ?? 0);
-        $this->impuestoMunicipal = (float) ($impuestoMunicipal ?? 0);
-
-        /*
-        |--------------------------------------------------------------------------
         | RESERVA PERSONALIZADA
         |--------------------------------------------------------------------------
         */
@@ -414,6 +418,7 @@ class ReservaConfirmacionMail extends Mailable
             $fechaReservaFormatted = Carbon::parse(
                 $fechaReserva
             )->format('d/m/Y');
+
         } catch (\Throwable $e) {
 
             $fechaReservaFormatted =
@@ -609,6 +614,7 @@ class ReservaConfirmacionMail extends Mailable
 
             </ul>";
 
+
         /*
         |--------------------------------------------------------------------------
         | SERVICIOS INCLUIDOS
@@ -646,6 +652,7 @@ class ReservaConfirmacionMail extends Mailable
 
                     $htmlEmail .=
                         "<li>{$desc}{$precio}</li>";
+
                 } elseif (is_string($s)) {
 
                     $decoded = json_decode($s, true);
@@ -670,6 +677,7 @@ class ReservaConfirmacionMail extends Mailable
 
                         $htmlEmail .=
                             "<li>{$desc}{$precio}</li>";
+
                     } else {
 
                         $htmlEmail .=
@@ -679,6 +687,28 @@ class ReservaConfirmacionMail extends Mailable
             }
 
             $htmlEmail .= "</ul>";
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | NOTAS EN EMAIL
+        |--------------------------------------------------------------------------
+        */
+
+        if (!empty(trim($this->notas))) {
+
+            $notasEmail = nl2br(
+                e($this->notas)
+            );
+
+            $htmlEmail .= "
+            <h3 style='margin-top:25px;'>
+                📝 Notas
+            </h3>
+
+            <div style='font-size:16px; line-height:1.6;'>
+                {$notasEmail}
+            </div>";
         }
 
         /*
@@ -883,6 +913,7 @@ class ReservaConfirmacionMail extends Mailable
             $logoSrc =
                 'data:image/png;base64,' .
                 $logoBase64;
+
         } else {
 
             $logoSrc =
@@ -956,7 +987,6 @@ th {
             </td>
 
             <td style='width:70%; vertical-align:middle; text-align:right;'>
-
 
                 <div style='font-size:11px; color:#000000; text-align:right;'>
 
@@ -1092,7 +1122,7 @@ th {
 
                     <br><br>
 
-                    <strong>Fecha de entrada:</strong><br>
+                    <strong>Fecha de ida:</strong><br>
 
                     {$fechaInicioFormatted}
 
@@ -1100,7 +1130,7 @@ th {
 
                 <td style='width:50%; padding:5px 10px; vertical-align:top;'>
 
-                    <strong>Fecha de salida:</strong><br>
+                    <strong>Fecha de vuelta:</strong><br>
 
                     {$fechaFinFormatted}
 
@@ -1117,96 +1147,39 @@ th {
 
         </table>
 
-    </div>
+    </div>";
 
-    <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>
-        Viajeros
-    </h3>
+        /*
+        |--------------------------------------------------------------------------
+        | NOTAS EN PDF
+        |--------------------------------------------------------------------------
+        */
 
-    <div style='margin-bottom:30px;'>
+        if (!empty(trim($this->notas))) {
 
-        <table>
-
-            <thead>
-
-                <tr style='background-color:#000000; color:#ffffff;'>
-
-                    <th style='padding:12px; text-align:left;'>
-                        Nombre
-                    </th>
-
-                    <th style='padding:12px; text-align:left;'>
-                        Apellidos
-                    </th>
-
-                    <th style='padding:12px; text-align:center;'>
-                        DNI
-                    </th>
-
-                    <th style='padding:12px; text-align:left;'>
-                        Email
-                    </th>
-
-                </tr>
-
-            </thead>
-
-            <tbody>";
-
-        foreach ($this->participantes as $p) {
-
-            if (is_object($p)) {
-                $p = (array) $p;
-            }
-
-            if (!is_array($p)) {
-                continue;
-            }
-
-            $nombreP =
-                $p['nombre']
-                ?? 'Nombre no disponible';
-
-            $apellidosP =
-                $p['apellidos']
-                ?? '';
-
-            $dni =
-                $p['dni']
-                ?? 'N/A';
-
-            $emailP =
-                $p['email']
-                ?? 'Email no disponible';
+            $notasPdf = nl2br(
+                htmlspecialchars(
+                    $this->notas,
+                    ENT_QUOTES,
+                    'UTF-8'
+                )
+            );
 
             $htmlPdf .= "
-                <tr style='background-color:#f5f5f5;'>
-
-                    <td style='padding:12px; border-bottom:1px solid rgba(0,0,0,0.15);'>
-                        {$nombreP}
-                    </td>
-
-                    <td style='padding:12px; border-bottom:1px solid rgba(0,0,0,0.15);'>
-                        {$apellidosP}
-                    </td>
-
-                    <td style='padding:12px; text-align:center; border-bottom:1px solid rgba(0,0,0,0.15);'>
-                        {$dni}
-                    </td>
-
-                    <td style='padding:12px; border-bottom:1px solid rgba(0,0,0,0.15);'>
-                        {$emailP}
-                    </td>
-
-                </tr>";
+    <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>
+        Notas:
+        {$notasPdf}
+    </h5>";
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | SERVICIOS INCLUIDOS EN PDF
+        | (la tabla de viajeros se ha eliminado de la factura)
+        |--------------------------------------------------------------------------
+        */
+
         $htmlPdf .= "
-            </tbody>
-
-        </table>
-
-    </div>
 
     <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>
         Servicios incluidos
@@ -1267,6 +1240,7 @@ th {
                         is_array($decoded)
                         ? ($decoded['precio'] ?? 0)
                         : 0;
+
                 } elseif (is_array($servicio)) {
 
                     $desc =
@@ -1276,6 +1250,7 @@ th {
                     $precio =
                         $servicio['precio']
                         ?? 0;
+
                 } else {
 
                     $desc = '';
@@ -1302,6 +1277,7 @@ th {
 
                 </tr>";
             }
+
         } else {
 
             $htmlPdf .= "
@@ -1326,30 +1302,6 @@ th {
 
     <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>
         Gastos de gestión incluidos.
-    </h5>
-
-    <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>
-        Importe a pagar en el alojamiento:
-        " .
-            number_format(
-                $this->importeAlojamiento,
-                2,
-                ',',
-                '.'
-            ) .
-            " €
-    </h5>
-
-    <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>
-        Impuesto municipal:
-        " .
-            number_format(
-                $this->impuestoMunicipal,
-                2,
-                ',',
-                '.'
-            ) .
-            " €
     </h5>
 
     <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>
@@ -1394,13 +1346,10 @@ th {
 
                         <strong>{$paqueteNombre}</strong><br>";
 
-
-
-            $htmlPdf .= "
+        $htmlPdf .= "
                         <span style='font-size:11px; color:#000000;'>
                             Del {$fechaInicio} al {$fechaFin}
                         </span>";
-        
 
         $htmlPdf .= "
 

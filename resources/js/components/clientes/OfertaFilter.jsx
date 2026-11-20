@@ -4,11 +4,10 @@ import { Tag, ChevronDown } from "lucide-react";
 const ofertas = [
     { key: "navidad", label: "Navidad" },
     { key: "verano", label: "Verano" },
-    { key: "san_valentin", label: "San Valentín" },
     { key: "black_friday", label: "Black Friday" },
     { key: "cyber_monday", label: "Cyber Monday" },
     { key: "bajada_precio", label: "Bajada de precio" },
-        { key: "sin_oferta", label: "Sin oferta" },
+    { key: "sin_oferta", label: "Sin oferta" },
 ];
 
 const OfertaFilter = ({ selected, onChange }) => {

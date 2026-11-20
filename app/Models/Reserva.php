@@ -31,6 +31,7 @@ class Reserva extends Model
         'vouchers_hotel',
         'acepta_condiciones_black_friday',
         'condiciones_black_friday_aceptadas_at',
+        'notas'
     ];
 
     protected $casts = [

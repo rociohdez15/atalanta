@@ -3,10 +3,11 @@ import { Filter, ChevronDown } from "lucide-react";
 
 const categorias = [
     { key: "todas", label: "Todas" },
-    { key: "Aventura", label: "Aventuras" },
+    { key: "Aventura", label: "Aventura" },
+    { key: "Deporte", label: "Deporte" },
+    { key: "Cultura", label: "Cultura" },
     { key: "Slow", label: "Slow Travel" },
-    { key: "Parque", label: "Parques de atracciones" },
-    { key: "Sol", label: "Sol y playa" },
+    { key: "Playa", label: "Escapadas al Mar" },
 ];
 
 const ExperienciaFilter = ({ selected, onChange }) => {

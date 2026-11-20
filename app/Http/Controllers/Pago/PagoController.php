@@ -10,6 +10,7 @@ use Stripe\Checkout\Session;
 use App\Models\Reserva;
 use App\Models\Participante;
 use App\Models\PaqueteTuristico;
+use App\Models\PrecioPaquete;
 use App\Models\Cliente;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +25,16 @@ class PagoController extends Controller
     /* =========================================================
         CREAR PAGO
     ========================================================== */
+    //
+    // Recalcula el precio en el servidor a partir de
+    // `precio_paquete_id`, en vez de fiarse de lo que mande el
+    // cliente.
+    //
+    // ⭐ NUEVO ⭐ Antes de crear el checkout de Stripe comprueba
+    // que todavía quedan habitaciones de ese tipo
+    // (habitaciones_disponibles). NO resta nada aquí: la resta
+    // se hace al confirmarse el pago, en procesarReservaPagada().
+    //
 
     public function crearPago(Request $request)
     {
@@ -32,6 +43,10 @@ class PagoController extends Controller
             Log::info('==============================');
             Log::info('CREAR PAGO INICIO');
             Log::info('==============================');
+
+            // =====================================================
+            // 1. AUTENTICACIÓN
+            // =====================================================
 
             $token = $request->cookie('access_token');
 
@@ -60,6 +75,10 @@ class PagoController extends Controller
                 'email'   => $user->email,
             ]);
 
+            // =====================================================
+            // 2. OBTENER RESERVA TEMPORAL
+            // =====================================================
+
             $reservaTemp = DB::table('reservas_temporales')
                 ->where('usuario_id', $user->id)
                 ->latest()
@@ -80,6 +99,10 @@ class PagoController extends Controller
                 'temp_id' => $reservaTemp->id
             ]);
 
+            // =====================================================
+            // 3. DECODIFICAR DATOS
+            // =====================================================
+
             $datos = json_decode($reservaTemp->datos, true);
 
             if (
@@ -96,6 +119,10 @@ class PagoController extends Controller
                 ], 400);
             }
 
+            // =====================================================
+            // 4. OBTENER PAQUETE
+            // =====================================================
+
             $paquete = PaqueteTuristico::findOrFail(
                 $datos['paqueteId']
             );
@@ -104,26 +131,124 @@ class PagoController extends Controller
 
             Log::info('crearPago: datos de paquete', [
                 'paquete_id' => $paquete->id,
-                'paquete' => $paquete->nombre,
-                'personas' => $numPersonas,
-                'plazas' => $paquete->plazas,
-                'precio' => $paquete->precio,
+                'paquete'    => $paquete->nombre,
+                'personas'   => $numPersonas,
+                'plazas'     => $paquete->plazas,
             ]);
+
+            // =====================================================
+            // 5. COMPROBAR PLAZAS
+            // =====================================================
 
             if ($paquete->plazas < $numPersonas) {
 
-                Log::warning('crearPago: plazas insuficientes');
+                Log::warning('crearPago: plazas insuficientes', [
+                    'plazas_disponibles' => $paquete->plazas,
+                    'personas' => $numPersonas,
+                ]);
 
                 return response()->json([
                     'error' => 'No hay plazas suficientes'
                 ], 400);
             }
 
-            $totalPrecio = $paquete->precio * $numPersonas;
+            // =====================================================
+            // 6. OBTENER TARIFA DE HABITACIÓN
+            // =====================================================
+
+            $precioPaqueteId = $datos['precio_paquete_id'] ?? null;
+
+            if (!$precioPaqueteId) {
+
+                Log::warning('crearPago: no se recibió precio_paquete_id', [
+                    'paquete_id' => $paquete->id,
+                    'temp_id' => $reservaTemp->id,
+                ]);
+
+                return response()->json([
+                    'error' => 'No se ha seleccionado un tipo de habitación'
+                ], 400);
+            }
+
+            // =====================================================
+            // 7. BUSCAR PRECIO DE LA HABITACIÓN
+            // =====================================================
+
+            $precioPaquete = DB::table('precios_paquetes')
+                ->where('id', $precioPaqueteId)
+                ->where('paquete_id', $paquete->id)
+                ->first();
+
+            if (!$precioPaquete) {
+
+                Log::error('crearPago: tarifa de habitación no encontrada', [
+                    'precio_paquete_id' => $precioPaqueteId,
+                    'paquete_id' => $paquete->id,
+                ]);
+
+                return response()->json([
+                    'error' => 'El precio de la habitación no es válido'
+                ], 400);
+            }
+
+            // =====================================================
+            // ⭐ NUEVO ⭐ 7b. COMPROBAR HABITACIONES DISPONIBLES
+            // =====================================================
+            //
+            // null = sin límite. Si hay un número y es 0, el tipo de
+            // habitación está agotado: avisamos antes de ir a Stripe.
+            //
+
+            if (
+                $precioPaquete->habitaciones_disponibles !== null &&
+                (int) $precioPaquete->habitaciones_disponibles <= 0
+            ) {
+
+                Log::warning('crearPago: habitación agotada', [
+                    'precio_paquete_id' => $precioPaquete->id,
+                    'tipo_habitacion'   => $precioPaquete->tipo_habitacion,
+                ]);
+
+                return response()->json([
+                    'error' => 'Ya no quedan habitaciones de este tipo'
+                ], 400);
+            }
+
+            // =====================================================
+            // 8. PRECIO POR PERSONA
+            // =====================================================
+
+            $precioPorPersona = (float) $precioPaquete->precio;
+
+            // =====================================================
+            // 9. CALCULAR PRECIO TOTAL
+            // =====================================================
+
+            $totalPrecio = round(
+                $precioPorPersona * $numPersonas,
+                2
+            );
+
+            Log::info('crearPago: precio calculado', [
+                'precio_paquete_id' => $precioPaquete->id,
+                'tipo_habitacion'   => $precioPaquete->tipo_habitacion,
+                'capacidad'         => $precioPaquete->capacidad,
+                'precio_por_persona' => $precioPorPersona,
+                'num_personas'      => $numPersonas,
+                'total'             => $totalPrecio,
+            ]);
+
+            // =====================================================
+            // 10. CONFIGURAR STRIPE
+            // =====================================================
 
             Stripe::setApiKey(
                 config('services.stripe.secret')
             );
+
+            // =====================================================
+            // 11. CREAR CHECKOUT DE STRIPE
+            // =====================================================
 
             $session = Session::create([
 
@@ -136,12 +261,27 @@ class PagoController extends Controller
                 'line_items' => [
                     [
                         'price_data' => [
+
                             'currency' => 'eur',
 
                             'product_data' => [
-                                'name' => $paquete->nombre
+                                'name' =>
+                                $paquete->nombre .
+                                    ' - Habitación ' .
+                                    ucfirst(
+                                        $precioPaquete->tipo_habitacion
+                                    ),
                             ],
 
+                            /*
+                             * Stripe recibe aquí el precio TOTAL
+                             * de la reserva.
+                             *
+                             * Ejemplo:
+                             *   Individual: 500 € x 1 viajero = 500 €
+                             *   Doble:      350 € x 2 viajeros = 700 €
+                             *   Triple:     300 € x 3 viajeros = 900 €
+                             */
                             'unit_amount' => (int) round(
                                 $totalPrecio * 100
                             ),
@@ -154,10 +294,16 @@ class PagoController extends Controller
                 'mode' => 'payment',
 
                 'success_url' =>
-                url('/pago/exito?session_id={CHECKOUT_SESSION_ID}'),
+                url(
+                    '/pago/exito?session_id={CHECKOUT_SESSION_ID}'
+                ),
 
                 'cancel_url' =>
                 url('/pago/cancelado'),
+
+                // =================================================
+                // METADATA
+                // =================================================
 
                 'metadata' => [
 
@@ -169,8 +315,30 @@ class PagoController extends Controller
 
                     'reserva_temp_id' =>
                     $reservaTemp->id,
+
+                    'precio_paquete_id' =>
+                    $precioPaquete->id,
+
+                    'tipo_habitacion' =>
+                    $precioPaquete->tipo_habitacion,
+
+                    'capacidad_habitacion' =>
+                    $precioPaquete->capacidad,
+
+                    'precio_por_persona' =>
+                    $precioPorPersona,
+
+                    'num_personas' =>
+                    $numPersonas,
+
+                    'total_precio' =>
+                    $totalPrecio,
                 ],
             ]);
+
+            // =====================================================
+            // 12. GUARDAR SESSION DE STRIPE
+            // =====================================================
 
             DB::table('reservas_temporales')
                 ->where('id', $reservaTemp->id)
@@ -179,12 +347,42 @@ class PagoController extends Controller
                     'updated_at' => now(),
                 ]);
 
-            Log::info('Stripe Checkout creado correctamente', [
-                'session_id' => $session->id,
-                'user_id' => $user->id,
-                'paquete_id' => $paquete->id,
-                'total' => $totalPrecio,
-            ]);
+            // =====================================================
+            // 13. LOG
+            // =====================================================
+
+            Log::info(
+                'Stripe Checkout creado correctamente',
+                [
+                    'session_id' =>
+                    $session->id,
+
+                    'user_id' =>
+                    $user->id,
+
+                    'paquete_id' =>
+                    $paquete->id,
+
+                    'precio_paquete_id' =>
+                    $precioPaquete->id,
+
+                    'tipo_habitacion' =>
+                    $precioPaquete->tipo_habitacion,
+
+                    'precio_por_persona' =>
+                    $precioPorPersona,
+
+                    'num_personas' =>
+                    $numPersonas,
+
+                    'total' =>
+                    $totalPrecio,
+                ]
+            );
+
+            // =====================================================
+            // 14. RESPUESTA
+            // =====================================================
 
             return response()->json([
                 'url' => $session->url
@@ -192,8 +390,11 @@ class PagoController extends Controller
         } catch (\Exception $e) {
 
             Log::error('Stripe crearPago ERROR', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+                'error' =>
+                $e->getMessage(),
+
+                'trace' =>
+                $e->getTraceAsString(),
             ]);
 
             return response()->json([
@@ -202,10 +403,13 @@ class PagoController extends Controller
         }
     }
 
-
     /* =========================================================
         GUARDAR RESERVA TEMPORAL
     ========================================================== */
+    //
+    // ⭐ NUEVO ⭐ Además de las plazas, comprueba que quedan
+    // habitaciones del tipo elegido. Tampoco resta aquí.
+    //
 
     public function guardarReservaTemp(Request $request)
     {
@@ -243,6 +447,12 @@ class PagoController extends Controller
 
                 'paqueteId' =>
                 'required|integer|exists:paquetes_turisticos,id',
+
+                // $request->validate() SOLO devuelve los campos que
+                // aparecen aquí, así que este campo es imprescindible
+                // para que llegue a reservas_temporales y a crearPago().
+                'precio_paquete_id' =>
+                'required|integer|exists:precios_paquetes,id',
 
                 'participantes' =>
                 'required|array|min:1|max:20',
@@ -294,11 +504,15 @@ class PagoController extends Controller
             }
 
             $errorPlazas = false;
+            $errorPrecioInvalido = false;
+            $errorSinHabitaciones = false; // ⭐ NUEVO
 
             DB::transaction(function () use (
                 $validated,
                 $user,
-                &$errorPlazas
+                &$errorPlazas,
+                &$errorPrecioInvalido,
+                &$errorSinHabitaciones
             ) {
 
                 $numPersonas =
@@ -312,6 +526,43 @@ class PagoController extends Controller
                 if ($paquete->plazas < $numPersonas) {
 
                     $errorPlazas = true;
+
+                    return;
+                }
+
+                // =============================================
+                // VALIDACIÓN ADICIONAL DE SEGURIDAD
+                // =============================================
+                //
+                // Comprobamos que la fila de precio pertenece
+                // realmente a este paquete (evita manipular el
+                // precio_paquete_id desde el cliente).
+                //
+                $precioValido = DB::table('precios_paquetes')
+                    ->where('id', $validated['precio_paquete_id'])
+                    ->where('paquete_id', $paquete->id)
+                    ->exists();
+
+                if (!$precioValido) {
+
+                    $errorPrecioInvalido = true;
+
+                    return;
+                }
+
+                // =============================================
+                // ⭐ NUEVO ⭐ HABITACIONES DISPONIBLES
+                // =============================================
+                //
+                // null = sin límite. Si es 0 (o menos), agotada.
+                //
+                $stock = DB::table('precios_paquetes')
+                    ->where('id', $validated['precio_paquete_id'])
+                    ->value('habitaciones_disponibles');
+
+                if ($stock !== null && (int) $stock <= 0) {
+
+                    $errorSinHabitaciones = true;
 
                     return;
                 }
@@ -350,11 +601,47 @@ class PagoController extends Controller
                 ], 400);
             }
 
+            if ($errorPrecioInvalido) {
+
+                Log::warning(
+                    'guardarReservaTemp: precio_paquete_id no corresponde al paquete',
+                    [
+                        'user_id' => $user->id,
+                        'paquete_id' => $validated['paqueteId'],
+                        'precio_paquete_id' => $validated['precio_paquete_id'],
+                    ]
+                );
+
+                return response()->json([
+                    'error' =>
+                    'El precio seleccionado no es válido para este paquete'
+                ], 422);
+            }
+
+            // ⭐ NUEVO ⭐
+            if ($errorSinHabitaciones) {
+
+                Log::warning(
+                    'guardarReservaTemp: habitación agotada',
+                    [
+                        'user_id' => $user->id,
+                        'paquete_id' => $validated['paqueteId'],
+                        'precio_paquete_id' => $validated['precio_paquete_id'],
+                    ]
+                );
+
+                return response()->json([
+                    'error' =>
+                    'Ya no quedan habitaciones de este tipo.'
+                ], 422);
+            }
+
             Log::info(
                 'Reserva temporal guardada correctamente',
                 [
                     'user_id' => $user->id,
                     'paquete_id' => $validated['paqueteId'],
+                    'precio_paquete_id' => $validated['precio_paquete_id'],
                     'personas' => count($validated['participantes']),
                 ]
             );
@@ -564,6 +851,13 @@ class PagoController extends Controller
     /* =========================================================
         PROCESAR RESERVA PAGADA
     ========================================================== */
+    //
+    // ⭐ NUEVO ⭐ Aquí se descuenta 1 de habitaciones_disponibles
+    // (tabla precios_paquetes) cuando el pago está confirmado.
+    // Es idempotente: si la reserva ya existe, se devuelve antes
+    // de llegar al descuento, así que webhook y verificarPagoExito
+    // no pueden restar dos veces.
+    //
 
     private function procesarReservaPagada($session)
     {
@@ -865,14 +1159,129 @@ class PagoController extends Controller
                 $numPersonas
             );
 
-            $totalPrecio =
-                $paquete->precio * $numPersonas;
+
+            /* =====================================================
+                ⭐ NUEVO ⭐ DESCONTAR HABITACIÓN
+            ====================================================== */
+            //
+            // Resta 1 a habitaciones_disponibles del tipo de
+            // habitación pagado. Cada reserva ocupa UNA habitación
+            // (el nº de viajeros lo fija la capacidad de la
+            // habitación elegida).
+            //
+            // reservarHabitacion() hace un UPDATE atómico
+            // "... WHERE habitaciones_disponibles > 0", así que dos
+            // pagos simultáneos no pueden coger la última habitación.
+            // Si el tipo no tiene límite (NULL) no se resta nada.
+            //
+            // Si falla, la excepción deshace TODA la transacción
+            // (también el descuento de plazas de arriba).
+            //
+
+            if (!empty($metadata['precio_paquete_id'])) {
+
+                $precioHabitacion = PrecioPaquete::where(
+                    'id',
+                    $metadata['precio_paquete_id']
+                )
+                    ->where('paquete_id', $paquete->id)
+                    ->first();
+
+                if ($precioHabitacion) {
+
+                    if (!$precioHabitacion->reservarHabitacion()) {
+
+                        DB::table(
+                            'stripe_session_resultados'
+                        )->updateOrInsert(
+
+                            [
+                                'stripe_session_id' =>
+                                $session->id
+                            ],
+
+                            [
+                                'usuario_id' =>
+                                $metadata['user_id'],
+
+                                'resultado' =>
+                                'sin_habitaciones',
+
+                                'created_at' =>
+                                now(),
+
+                                'updated_at' =>
+                                now(),
+                            ]
+                        );
+
+                        Log::warning(
+                            'NO QUEDAN HABITACIONES DE ESTE TIPO',
+                            [
+                                'precio_paquete_id' =>
+                                $precioHabitacion->id,
+
+                                'tipo_habitacion' =>
+                                $precioHabitacion->tipo_habitacion,
+
+                                'session_id' =>
+                                $session->id,
+                            ]
+                        );
+
+                        throw new \Exception(
+                            'PERMANENTE: No quedan habitaciones de este tipo'
+                        );
+                    }
+
+                    Log::info(
+                        'Habitación descontada',
+                        [
+                            'precio_paquete_id' =>
+                            $precioHabitacion->id,
+
+                            'tipo_habitacion' =>
+                            $precioHabitacion->tipo_habitacion,
+                        ]
+                    );
+                } else {
+
+                    Log::warning(
+                        'Habitación de la metadata no encontrada para este paquete',
+                        [
+                            'precio_paquete_id' =>
+                            $metadata['precio_paquete_id'],
+
+                            'paquete_id' =>
+                            $paquete->id,
+                        ]
+                    );
+                }
+            }
+
+
+            // =====================================================
+            // PRECIO REAL DE LA HABITACIÓN
+            // =====================================================
+            //
+            // Se usa el total ya calculado y verificado en
+            // crearPago() (metadata), que es la fuente de verdad
+            // del importe cobrado por Stripe.
+            //
+            $precioPorPersonaReal = isset($metadata['precio_por_persona'])
+                ? (float) $metadata['precio_por_persona']
+                : (float) $paquete->precio;
+
+            $totalPrecio = isset($metadata['total_precio'])
+                ? (float) $metadata['total_precio']
+                : round($precioPorPersonaReal * $numPersonas, 2);
 
             Log::info(
                 'Plazas descontadas',
                 [
                     'personas' => $numPersonas,
                     'nuevo_stock' => $paquete->fresh()->plazas,
+                    'precio_por_persona' => $precioPorPersonaReal,
                     'total' => $totalPrecio,
                 ]
             );
@@ -1316,7 +1725,7 @@ class PagoController extends Controller
                     new ReservaConfirmacionMail(
                         cliente: $clienteArray,
                         fechaReservaFormatted: date('d/m/Y'),
-                        precioUnitario: $paquete->precio,
+                        precioUnitario: $precioPorPersonaReal,
                         subtotal: $totalPrecio,
                         name: $nombreCompleto,
                         tipoPago: 'total',
@@ -1337,9 +1746,7 @@ class PagoController extends Controller
                         serviciosNoIncluidos: $serviciosNoIncluidos,
                         descuentos: $descuentos,
                         itinerario: $itinerario,
-                        vouchers: [],
-                        importeAlojamiento: 0,
-                        impuestoMunicipal: 0
+                        vouchers: []
                     )
                 );
 
