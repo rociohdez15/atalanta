@@ -17,7 +17,43 @@ import {
     Trash2,
     MapPin,
     Loader,
+    BedDouble,
 } from "lucide-react";
+
+// -------------------------------------------------
+// NOMBRE VISIBLE DEL TIPO DE HABITACIÓN
+// -------------------------------------------------
+//
+// Aquí solo llega el texto ("individual", "doble"...) que
+// se eligió en la pantalla de reserva, así que solo se
+// formatea para mostrarlo bonito.
+//
+const NOMBRES_TIPO_HABITACION = {
+    individual: "Individual",
+    sencilla: "Individual",
+    single: "Individual",
+    doble: "Doble",
+    double: "Doble",
+    triple: "Triple",
+    cuadruple: "Cuádruple",
+    quintuple: "Quíntuple",
+};
+
+const formatearTipoHabitacion = (tipo) => {
+    if (!tipo) return "";
+
+    const clave = tipo
+        .toLowerCase()
+        .trim()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+
+    if (NOMBRES_TIPO_HABITACION[clave]) {
+        return NOMBRES_TIPO_HABITACION[clave];
+    }
+
+    return tipo.charAt(0).toUpperCase() + tipo.slice(1).toLowerCase();
+};
 
 const TipoPago = () => {
     const location = useLocation();
@@ -27,7 +63,6 @@ const TipoPago = () => {
     const { paqueteId: paqueteIdRuta } = useParams();
 
     const [tipoPago, setTipoPago] = useState("total");
-    const [precioPaquete, setPrecioPaquete] = useState(0);
     const [cuotas, setCuotas] = useState(3);
     const [loading, setLoading] = useState(true);
     const [plazas, setPlazas] = useState(1);
@@ -40,12 +75,58 @@ const TipoPago = () => {
     const [itinerarios, setItinerarios] = useState([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // -------------------------------------------------
+    // PRECIO REAL SEGÚN LA HABITACIÓN ELEGIDA EN LA RESERVA
+    // -------------------------------------------------
+    //
+    // Viene en location.state, enviado desde Reserva.jsx.
+    // Si no llega (por ejemplo, tras recargar la página),
+    // se busca de respaldo en los datos del cliente/reserva
+    // temporal y, en último caso, se usa el precio "desde"
+    // del paquete (compatibilidad con paquetes antiguos).
+    //
+    const [precioPorPersona, setPrecioPorPersona] = useState(
+        Number(location.state?.precioPorPersona) || 0,
+    );
+    const [tipoHabitacion, setTipoHabitacion] = useState(
+        location.state?.tipoHabitacion || null,
+    );
+
+    // -------------------------------------------------
+    // ⭐ CORRECCIÓN CLAVE ⭐
+    // -------------------------------------------------
+    //
+    // Este es el ID real de la fila en la tabla
+    // `precios_paquetes` (tipo_habitacion + capacidad + precio).
+    //
+    // Es el dato que el backend (crearPago) necesita para
+    // recalcular el precio de forma segura en el servidor.
+    // Sin este ID, el pago en Stripe no puede usar el precio
+    // real de la habitación elegida.
+    //
+    const [precioPaqueteId, setPrecioPaqueteId] = useState(
+        location.state?.precioPaqueteId || null,
+    );
+
     useEffect(() => {
         if (location.state?.participantes) {
             setParticipantes(location.state.participantes);
             setPlazas(location.state.participantes.length);
         } else {
             console.warn("Error ");
+        }
+
+        if (location.state?.precioPorPersona) {
+            setPrecioPorPersona(Number(location.state.precioPorPersona));
+        }
+
+        if (location.state?.tipoHabitacion) {
+            setTipoHabitacion(location.state.tipoHabitacion);
+        }
+
+        // ⭐ Recuperar el ID de precio si llega por navegación
+        if (location.state?.precioPaqueteId) {
+            setPrecioPaqueteId(location.state.precioPaqueteId);
         }
     }, [location.state]);
 
@@ -92,13 +173,71 @@ const TipoPago = () => {
                     resItinerarios,
                     resCliente,
                 ]) => {
-                    setPaquete(resPaquete.data);
-                    setPrecioPaquete(resPaquete.data.precio);
+                    const paqueteData = resPaquete.data;
+
+                    setPaquete(paqueteData);
                     setImagenes(resImagenes.data);
                     setPuntosMapa(resPuntos.data);
                     setItinerarios(resItinerarios.data);
                     setClienteId(resCliente.data.id);
-                    setPlazas(resCliente.data.participantes?.length || 1);
+                    setPlazas(resCliente.data.participantes?.length || plazas);
+
+                    // Tipos de habitación con precio del paquete (relación 'precios')
+                    const precios = Array.isArray(paqueteData.precios)
+                        ? paqueteData.precios
+                        : [];
+
+                    // Si el estado de navegación se perdió (p.ej. recarga de
+                    // página), intentamos recuperar el tipo de habitación
+                    // desde la reserva temporal del cliente.
+                    const tipoHabitacionFinal =
+                        tipoHabitacion ||
+                        resCliente.data.tipo_habitacion ||
+                        null;
+
+                    if (!tipoHabitacion && tipoHabitacionFinal) {
+                        setTipoHabitacion(tipoHabitacionFinal);
+                    }
+
+                    setPrecioPorPersona((actual) => {
+                        // Ya lo teníamos por location.state: no lo tocamos
+                        if (actual > 0) return actual;
+
+                        // Buscamos el precio de ese tipo de habitación
+                        // dentro de paquete.precios
+                        if (tipoHabitacionFinal) {
+                            const habitacion = precios.find(
+                                (p) =>
+                                    (p.tipo_habitacion || "")
+                                        .toLowerCase()
+                                        .trim() ===
+                                    tipoHabitacionFinal.toLowerCase().trim(),
+                            );
+
+                            if (habitacion) {
+                                // ⭐ Guardamos también el ID real de la fila
+                                // de precio, no solo el importe.
+                                setPrecioPaqueteId((actualId) =>
+                                    actualId || habitacion.id,
+                                );
+                                return Number(habitacion.precio);
+                            }
+                        }
+
+                        // No se pudo identificar la habitación pero el
+                        // paquete solo tiene un tipo: usamos ese
+                        if (precios.length === 1) {
+                            setPrecioPaqueteId((actualId) =>
+                                actualId || precios[0].id,
+                            );
+                            return Number(precios[0].precio);
+                        }
+
+                        // Último recurso: precio "desde" del paquete
+                        // (paquetes antiguos sin precios por habitación)
+                        return Number(paqueteData.precio || 0);
+                    });
+
                     setLoading(false);
                 },
             )
@@ -108,23 +247,22 @@ const TipoPago = () => {
                 );
                 setLoading(false);
             });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [paqueteIdRuta, location.state, paqueteId]);
 
-    const totalPrice = paquete?.precio
-        ? paquete.precio * participantes.length
+    const totalPrice = precioPorPersona
+        ? precioPorPersona * participantes.length
         : 0;
-    const totalOriginalPrice = paquete?.precio
-        ? paquete.precio * participantes.length
-        : null;
+    const totalOriginalPrice = totalPrice || null;
 
     const calcularTotal = () => {
-        if (!paquete) return "0.00";
-        return (paquete.precio * participantes.length).toFixed(2);
+        if (!precioPorPersona) return "0.00";
+        return (precioPorPersona * participantes.length).toFixed(2);
     };
 
     const calcularCuota = () => {
-        if (!paquete) return "0.00";
-        return ((paquete.precio * participantes.length) / cuotas).toFixed(2);
+        if (!precioPorPersona) return "0.00";
+        return ((precioPorPersona * participantes.length) / cuotas).toFixed(2);
     };
 
     const handlePagar = async () => {
@@ -150,6 +288,21 @@ const TipoPago = () => {
                 return;
             }
 
+            // ⭐ CORRECCIÓN CLAVE ⭐
+            // Sin este ID, el backend (crearPago) no puede saber qué
+            // fila de precios_paquetes usar y el pago fallará o usará
+            // un precio incorrecto. Bloqueamos el pago antes de llegar
+            // a Stripe.
+            if (!precioPaqueteId) {
+                setIsSubmitting(false);
+                Swal.fire({
+                    icon: "error",
+                    title: "Error",
+                    text: "No se pudo identificar el precio de la habitación seleccionada. Vuelve a seleccionar la habitación.",
+                });
+                return;
+            }
+
             const datosReserva = {
                 participantes,
                 tipoPago,
@@ -158,6 +311,11 @@ const TipoPago = () => {
                     tipoPago === "parcial" ? calcularCuota() : calcularTotal(),
                 plazas,
                 paqueteId: parseInt(paqueteIdRuta || paqueteId),
+                tipoHabitacion,
+                precioUnitario: precioPorPersona,
+                // ⭐ Este es el dato que realmente usa el backend
+                // para calcular el precio de forma segura.
+                precio_paquete_id: precioPaqueteId,
             };
 
             // 🟡 Guardar reserva temporal
@@ -751,6 +909,50 @@ const TipoPago = () => {
                                             }}
                                         />
 
+                                        {/* Habitación elegida */}
+                                        {tipoHabitacion && (
+                                            <>
+                                                <div className="mb-3">
+                                                    <div className="d-flex align-items-center mb-2">
+                                                        <BedDouble
+                                                            size={16}
+                                                            className="me-2 text-white"
+                                                        />
+                                                        <span
+                                                            className="fw-medium"
+                                                            style={{
+                                                                color: "#ffffff",
+                                                                fontFamily:
+                                                                    "'Inter', sans-serif",
+                                                                fontSize:
+                                                                    "14px",
+                                                            }}
+                                                        >
+                                                            Habitación
+                                                        </span>
+                                                    </div>
+                                                    <div
+                                                        className="small"
+                                                        style={{
+                                                            color: "#ffffff",
+                                                            fontFamily:
+                                                                "'Inter', sans-serif",
+                                                            fontSize: "14px",
+                                                        }}
+                                                    >
+                                                        {formatearTipoHabitacion(
+                                                            tipoHabitacion,
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <hr
+                                                    style={{
+                                                        borderColor: "#ffffff",
+                                                    }}
+                                                />
+                                            </>
+                                        )}
+
                                         {/* Precio */}
                                         <div>
                                             <div className="mb-3">
@@ -776,9 +978,10 @@ const TipoPago = () => {
                                                                     "14px",
                                                             }}
                                                         >
-                                                            {paquete?.precio ||
-                                                                "Cargando..."}
-                                                            €
+                                                            {precioPorPersona >
+                                                            0
+                                                                ? `${precioPorPersona.toFixed(2)}€`
+                                                                : "Cargando..."}
                                                         </span>
                                                     </div>
                                                 </div>
@@ -822,7 +1025,9 @@ const TipoPago = () => {
                                                 }}
                                             >
                                                 <span>Total:</span>
-                                                <span>€{totalPrice}</span>
+                                                <span>
+                                                    €{totalPrice.toFixed(2)}
+                                                </span>
                                             </div>
                                             <br />
                                             {/* Resumen del plan de pago seleccionado */}

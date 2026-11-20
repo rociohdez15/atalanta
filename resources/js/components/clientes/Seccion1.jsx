@@ -1,28 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import axios from "axios";
-function getCountdownEnd() {
-    const now = new Date();
-
-    const end = new Date(now);
-
-    // Todos los días a las 20:00:00
-    end.setHours(20, 0, 0, 0);
-
-    // Si ya han pasado las 20:00,
-    // el próximo final será mañana a las 20:00
-    if (end.getTime() <= now.getTime()) {
-        end.setDate(end.getDate() + 1);
-    }
-
-    return end.getTime();
-}
 
 /* =========================================================
-   BLACK FRIDAY CTA
+   TIEMPOS DE CAMPAÑA (Black Friday / Cyber Monday)
+   Ciclo diario: la oferta empieza a las 20:00 y termina
+   a las 20:00 del día siguiente.
 ========================================================= */
 
-function getBlackFridayTimes() {
+function getCampanaTimes() {
     const now = new Date();
 
     // Hoy a las 20:00
@@ -50,11 +36,31 @@ function getBlackFridayTimes() {
 }
 
 /* =========================================================
-   BLACK FRIDAY CTA
+   CONFIGURACIÓN DE LAS CAMPAÑAS CON CONTADOR
 ========================================================= */
 
-const BlackFridayCTA = () => {
-    const initialData = getBlackFridayTimes();
+const CAMPANAS_CTA = {
+    black_friday: {
+        oferta: "black_friday",
+        textoPreparate: "¡Prepárate para las ofertas Black Friday!",
+        textoBoton: "Ver ofertas Black Friday",
+    },
+
+    cyber_monday: {
+        oferta: "cyber_monday",
+        textoPreparate: "¡Prepárate para las ofertas Cyber Monday!",
+        textoBoton: "Ver ofertas Cyber Monday",
+    },
+};
+
+/* =========================================================
+   CAMPAÑA CTA (Black Friday + Cyber Monday)
+========================================================= */
+
+const CampanaCTA = ({ campana }) => {
+    const config = CAMPANAS_CTA[campana] ?? CAMPANAS_CTA.black_friday;
+
+    const initialData = getCampanaTimes();
 
     const [isActive, setIsActive] = useState(initialData.isActive);
 
@@ -77,7 +83,7 @@ const BlackFridayCTA = () => {
              *   el siguiente periodo de espera.
              */
             if (diff <= 0) {
-                const newData = getBlackFridayTimes();
+                const newData = getCampanaTimes();
 
                 setIsActive(newData.isActive);
                 setTarget(newData.target);
@@ -115,7 +121,7 @@ const BlackFridayCTA = () => {
     const ss = String(Math.floor((remaining % 60000) / 1000)).padStart(2, "0");
 
     return (
-        <div className="black-friday-slide d-flex flex-column align-items-center justify-content-center">
+        <div className="campana-slide d-flex flex-column align-items-center justify-content-center">
             {/* =================================================
                 TEXTO DEL ESTADO
             ================================================= */}
@@ -208,17 +214,17 @@ const BlackFridayCTA = () => {
             >
                 {isActive
                     ? "¡Aprovecha la oferta antes de que termine!"
-                    : "¡Prepárate para las ofertas Black Friday!"}
+                    : config.textoPreparate}
             </div>
 
             {/* =================================================
-                BOTÓN BLACK FRIDAY
+                BOTÓN DE LA CAMPAÑA
             ================================================= */}
 
             <button
                 type="button"
                 onClick={() => {
-                    window.location.href = "/experiencias?oferta=black_friday";
+                    window.location.href = `/experiencias?oferta=${config.oferta}`;
                 }}
                 className="btn rounded-top-2 rounded-bottom-2"
                 style={{
@@ -241,7 +247,7 @@ const BlackFridayCTA = () => {
                 }}
             >
                 <i className="fa-solid fa-bag-shopping"></i>
-                Ver ofertas Black Friday
+                {config.textoBoton}
                 <i className="fa-solid fa-arrow-right"></i>
             </button>
         </div>
@@ -272,6 +278,10 @@ const Seccion1 = () => {
         black_friday: "/images/campanas/fondo_bf.png",
 
         black_friday_mobile: "/images/campanas/fondo_bfm.png",
+
+        cyber_monday: "/images/campanas/ciberlunes.png",
+
+        cyber_monday_mobile: "/images/campanas/fondo_cmm.png",
 
         navidad:
             "https://images.unsplash.com/photo-1543589077-47d81606c1bf?auto=format&fit=crop&w=1600&q=80",
@@ -307,6 +317,14 @@ const Seccion1 = () => {
             p1: "Encuentra oportunidades únicas para viajar más por menos",
 
             p2: "Aprovecha hoy",
+        },
+
+        cyber_monday: {
+            titulo: "Las mejores ofertas online para tu próxima aventura",
+
+            p1: "Descubre experiencias únicas con descuentos solo por tiempo limitado",
+
+            p2: "Reserva hoy",
         },
 
         navidad: {
@@ -405,6 +423,11 @@ const Seccion1 = () => {
             return "verano";
         }
 
+        // Cyber Monday (se comprueba antes que Black Friday)
+        if (limpio.includes("cyber") || limpio.includes("monday")) {
+            return "cyber_monday";
+        }
+
         if (limpio.includes("black") || limpio.includes("friday")) {
             return "black_friday";
         }
@@ -431,6 +454,9 @@ const Seccion1 = () => {
             case "black_friday":
                 return "fa-bag-shopping";
 
+            case "cyber_monday":
+                return "fa-laptop";
+
             case "navidad":
                 return "fa-snowflake";
 
@@ -453,6 +479,9 @@ const Seccion1 = () => {
 
             case "black_friday":
                 return "#111827";
+
+            case "cyber_monday":
+                return "#0ea5e9";
 
             case "navidad":
                 return "#60a5fa";
@@ -548,6 +577,22 @@ const Seccion1 = () => {
             carousel.removeEventListener("slid.bs.carousel", handleSlide);
         };
     }, [campanasAgrupadas]);
+
+    /* =====================================================
+       CLASE DEL FONDO (escritorio / móvil por campaña)
+    ===================================================== */
+
+    const getClaseFondo = () => {
+        if (fondoActual === fondosCampanas.black_friday) {
+            return "black-friday-background";
+        }
+
+        if (fondoActual === fondosCampanas.cyber_monday) {
+            return "cyber-monday-background";
+        }
+
+        return "";
+    };
 
     /* =====================================================
        CARD GRID
@@ -672,7 +717,7 @@ const Seccion1 = () => {
             <div className="reserve-button-container">
                 <Link
                     to="/experiencias"
-                    className="btn rounded-top-2 rounded-bottom-2 p-nosotros"
+                    className="btn rounded-top-2 rounded-bottom-2 p-nosotros reserve-btn"
                     style={{
                         backgroundColor: "rgba(255, 255, 255, 0.8)",
 
@@ -689,7 +734,6 @@ const Seccion1 = () => {
                         transition: "all 0.3s ease",
 
                         fontFamily: "Inter, sans-serif",
-                        marginTop: "150px",
                     }}
                 >
                     Reservar ahora
@@ -735,16 +779,38 @@ const Seccion1 = () => {
                 ===================================================== */
 
                 .hero-text-container {
-                    height: 250px;
-                    min-height: 250px;
-                    max-height: 250px;
+                    height: auto;
+                    min-height: auto;
+                    max-height: none;
 
                     display: flex;
                     flex-direction: column;
                     justify-content: center;
                     align-items: center;
 
-                    overflow: hidden;
+                    padding-top: 2rem;
+                    padding-bottom: 0;
+                    margin-bottom: 1rem !important;
+                    overflow: visible;
+                }
+
+                /* =====================================================
+                   ESCRITORIO GRANDE
+                ===================================================== */
+
+                @media (min-width: 1200px) {
+                    .hero-text-container {
+                        height: auto;
+                        min-height: auto;
+                        max-height: none;
+                        padding-top: 2rem;
+                        padding-bottom: 0;
+                        margin-bottom: 1rem !important;
+                    }
+
+                    .hero-text-container h1 {
+                        line-height: 1.05;
+                    }
                 }
 
                 .hero-text-container h1 {
@@ -801,14 +867,27 @@ const Seccion1 = () => {
                     min-height: 420px !important;
                     max-height: 420px !important;
                 }
-                
+
+                /* =====================================================
+                   FONDOS DE CAMPAÑA (ESCRITORIO)
+                ===================================================== */
+
                 .black-friday-background {
                     background-image: url("/images/campanas/fondo_bf.png") !important;
                 }
 
-                @media (max-width: 575px) {
+                .cyber-monday-background {
+                    background-image: url("/images/campanas/fondo_cm.png") !important;
+                }
+
+                /* Móvil + tablet: fondos verticales de las campañas */
+                @media (max-width: 1199px) {
                     .black-friday-background {
                         background-image: url("/images/campanas/fondo_bfm.png") !important;
+                    }
+
+                    .cyber-monday-background {
+                        background-image: url("/images/campanas/fondo_cmm.png") !important;
                     }
                 }
 
@@ -861,11 +940,15 @@ const Seccion1 = () => {
                     justify-content: center;
                 }
 
+                .reserve-button-container .reserve-btn {
+                    margin-top: 150px;
+                }
+
                 /* =====================================================
-                   BLACK FRIDAY
+                   SLIDE DE CAMPAÑA (BLACK FRIDAY / CYBER MONDAY)
                 ===================================================== */
 
-                .black-friday-slide {
+                .campana-slide {
                     width: 100%;
 
                     height: 420px !important;
@@ -902,22 +985,26 @@ const Seccion1 = () => {
                 }
 
                 /* =====================================================
-                   MÓVIL
+                   MÓVIL + TABLET
+                   (antes: max-width 575px → ahora 1199px)
                 ===================================================== */
 
-                @media (max-width: 575px) {
+                @media (max-width: 1199px) {
 
                     /* ---------------------------------------------
                        TÍTULO
                     --------------------------------------------- */
 
                     .hero-text-container {
-                        height: 300px !important;
-                        min-height: 300px !important;
-                        max-height: 300px !important;
+                        height: auto !important;
+                        min-height: auto !important;
+                        max-height: none !important;
 
+                        padding-top: 1rem !important;
+                        padding-bottom: 0 !important;
                         padding-left: 10px;
                         padding-right: 10px;
+                        margin-bottom: 1rem !important;
                     }
 
                     .hero-text-container h1 {
@@ -944,30 +1031,63 @@ const Seccion1 = () => {
                     --------------------------------------------- */
 
                     #cardsCarousel {
-                        height: 420px !important;
-                        min-height: 420px !important;
-                        max-height: 420px !important;
+                        height: auto !important;
+                        min-height: 0 !important;
+                        max-height: none !important;
+
+                        /* espacio para los indicadores (bottom: -40px) */
+                        margin-bottom: 3rem;
                     }
 
                     #cardsCarousel .carousel-inner {
-                        height: 420px !important;
-                        min-height: 420px !important;
-                        max-height: 420px !important;
+                        height: auto !important;
+                        min-height: 0 !important;
+                        max-height: none !important;
+                        overflow: hidden;
+                        padding-bottom: 0.75rem;
                     }
 
                     #cardsCarousel .carousel-item {
-                        height: 420px !important;
-                        min-height: 420px !important;
-                        max-height: 420px !important;
+                        height: auto !important;
+                        min-height: 0 !important;
+                        max-height: none !important;
+                        overflow: visible;
                     }
 
                     #cardsCarousel .carousel-item.active {
-                        height: 420px !important;
-                        min-height: 420px !important;
-                        max-height: 420px !important;
+                        height: auto !important;
+                        min-height: 0 !important;
+                        max-height: none !important;
                     }
 
                     #cardsCarousel .carousel-item > * {
+                        height: auto !important;
+                        min-height: 0 !important;
+                        max-height: none !important;
+                    }
+
+                    /* Cuadrícula de tarjetas (dentro o fuera del carrusel,
+                       p. ej. cuando no hay campañas activas) */
+                    .card-grid-slide {
+                        height: auto !important;
+                        min-height: 0 !important;
+                        max-height: none !important;
+                        overflow: visible !important;
+                        padding-bottom: 0.5rem;
+                    }
+
+                    /* El slide de cuadrícula crece con su contenido */
+                    #cardsCarousel .carousel-item > .card-grid-slide {
+                        height: auto !important;
+                        min-height: 0 !important;
+                        max-height: none !important;
+                        overflow: visible;
+                        padding-bottom: 0.5rem;
+                    }
+
+                    /* Los slides de campaña (Black Friday / Cyber Monday)
+                       mantienen altura fija */
+                    #cardsCarousel .carousel-item > .campana-slide {
                         height: 420px !important;
                         min-height: 420px !important;
                         max-height: 420px !important;
@@ -1001,7 +1121,7 @@ const Seccion1 = () => {
                         flex: 0 0 calc(50% - 0.5rem);
 
                         max-width:
-                            calc(50% - 0.5rem);
+                            min(calc(50% - 0.5rem), 200px);
                     }
 
                     .nav-card-wrapper .card {
@@ -1039,26 +1159,30 @@ const Seccion1 = () => {
                     --------------------------------------------- */
 
                     .reserve-button-container {
-                        margin-top: -50px;
+                        margin-top: 1.5rem;
 
-                        height: 40px;
+                        height: auto;
+                    }
+
+                    .reserve-button-container .reserve-btn {
+                        margin-top: 0 !important;
                     }
 
                     /* ---------------------------------------------
-                       BLACK FRIDAY
+                       CAMPAÑAS (BLACK FRIDAY / CYBER MONDAY)
                     --------------------------------------------- */
 
-                    .black-friday-slide {
+                    .campana-slide {
                         height: 420px !important;
                         min-height: 420px !important;
                         max-height: 420px !important;
                     }
 
-                    .black-friday-slide > div:first-child {
+                    .campana-slide > div:first-child {
                         gap: 0.5rem !important;
                     }
 
-                    .black-friday-slide
+                    .campana-slide
                     > div:first-child
                     > div {
                         min-width:
@@ -1068,7 +1192,7 @@ const Seccion1 = () => {
                             0.5rem 0.6rem !important;
                     }
 
-                    .black-friday-slide button {
+                    .campana-slide button {
                         font-size:
                             12px !important;
 
@@ -1084,11 +1208,7 @@ const Seccion1 = () => {
             ===================================================== */}
 
             <div
-                className={`seccion1-background ${
-                    fondoActual === fondosCampanas.black_friday
-                        ? "black-friday-background"
-                        : ""
-                }`}
+                className={`seccion1-background ${getClaseFondo()}`}
                 style={{
                     backgroundImage: `url(${fondoActual})`,
                 }}
@@ -1195,8 +1315,9 @@ const Seccion1 = () => {
                                         index === 0 ? "active" : ""
                                     }`}
                                 >
-                                    {nombre === "black_friday" ? (
-                                        <BlackFridayCTA />
+                                    {nombre === "black_friday" ||
+                                    nombre === "cyber_monday" ? (
+                                        <CampanaCTA campana={nombre} />
                                     ) : (
                                         <CardGrid
                                             grupo={cards}

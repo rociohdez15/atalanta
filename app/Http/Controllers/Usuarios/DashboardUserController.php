@@ -144,38 +144,77 @@ class DashboardUserController extends Controller
     public function listarReservasUsuario(Request $request)
     {
         try {
-            // Leer token desde cookie HttpOnly
+            // El token se recibe desde la cookie HttpOnly.
             $token = $request->cookie('access_token');
+
             if (!$token) {
                 return response()->json(['error' => 'Token no proporcionado'], 401);
             }
 
             $user = JWTAuth::setToken($token)->authenticate();
 
-            // Buscar cliente por usuario_id
             $cliente = Cliente::where('usuario_id', $user->id)->first();
+
             if (!$cliente) {
                 return response()->json(['error' => 'Cliente no encontrado'], 404);
             }
 
-            // Obtener reservas con el paquete turístico y el cliente
-            $reservas = $cliente->reservas()->with(['paquete', 'cliente'])->get();
+            // Incluimos el paquete cuando existe. Las reservas personalizadas
+            // pueden no tener paquete asociado y guardan sus fechas en reservas.
+            $reservas = $cliente->reservas()
+                ->with(['paquete', 'cliente'])
+                ->get();
 
-            $resultado = $reservas->map(function ($reserva) {
-                $fechaReserva = $reserva->fecha_reserva instanceof \Carbon\Carbon ? $reserva->fecha_reserva->format('Y-m-d') : null;
-                $fechaInicio = $reserva->paquete && $reserva->paquete->fecha_inicio instanceof \Carbon\Carbon ? $reserva->paquete->fecha_inicio->format('Y-m-d') : null;
-                $fechaFin = $reserva->paquete && $reserva->paquete->fecha_fin instanceof \Carbon\Carbon ? $reserva->paquete->fecha_fin->format('Y-m-d') : null;
+            $formatearFecha = static function ($valor) {
+                if (empty($valor)) {
+                    return null;
+                }
 
-                $clienteNombreCompleto = $reserva->cliente ? $reserva->cliente->nombre . ' ' . $reserva->cliente->apellidos : null;
+                try {
+                    return \Carbon\Carbon::parse($valor)->format('Y-m-d');
+                } catch (\Throwable $e) {
+                    return null;
+                }
+            };
+
+            $resultado = $reservas->map(function ($reserva) use ($formatearFecha) {
+                $paquete = $reserva->paquete;
+                $esPersonalizado = empty($reserva->paquete_id)
+                    || (int) $reserva->paquete_id === 0;
+
+                // Para reservas personalizadas, el nombre se guarda en la reserva;
+                // para las normales, se obtiene del paquete relacionado.
+                $experiencia = $esPersonalizado
+                    ? ($reserva->destino
+                        ?? $reserva->nombre_experiencia
+                        ?? $reserva->experiencia
+                        ?? 'Experiencia personalizada')
+                    : ($paquete?->nombre
+                        ?? $reserva->destino
+                        ?? 'Experiencia');
+
+                // En las personalizadas las fechas pertenecen a la reserva.
+                // En las normales se usan primero las fechas del paquete.
+                $fechaInicioOrigen = $esPersonalizado
+                    ? ($reserva->fecha_inicio ?? null)
+                    : ($paquete?->fecha_inicio ?? $reserva->fecha_inicio ?? null);
+
+                $fechaFinOrigen = $esPersonalizado
+                    ? ($reserva->fecha_fin ?? null)
+                    : ($paquete?->fecha_fin ?? $reserva->fecha_fin ?? null);
+
+                $clienteNombreCompleto = $reserva->cliente
+                    ? trim(($reserva->cliente->nombre ?? '') . ' ' . ($reserva->cliente->apellidos ?? ''))
+                    : null;
 
                 return [
                     'reserva_id' => $reserva->id,
                     'numero_reserva' => $reserva->reservation_token ?? null,
-                    'experiencia' => $reserva->paquete?->nombre,
+                    'experiencia' => $experiencia,
                     'clienteNombreCompleto' => $clienteNombreCompleto,
-                    'fecha_reserva' => $fechaReserva,
-                    'fecha_inicio' => $fechaInicio,
-                    'fecha_fin' => $fechaFin,
+                    'fecha_reserva' => $formatearFecha($reserva->fecha_reserva),
+                    'fecha_inicio' => $formatearFecha($fechaInicioOrigen),
+                    'fecha_fin' => $formatearFecha($fechaFinOrigen),
                     'tipo_pago' => $reserva->metodo_pago,
                     'num_cuotas' => $reserva->num_cuotas ?? null,
                     'importe_cuotas' => $reserva->importe_cuotas ?? null,
@@ -186,60 +225,108 @@ class DashboardUserController extends Controller
             });
 
             return response()->json($resultado);
-        } catch (\Exception $e) {
-            Log::error('Error en listarReservasUsuario: ' . $e->getMessage());
-            return response()->json(['error' => 'Error interno: ' . $e->getMessage()], 500);
+        } catch (\Throwable $e) {
+            Log::error('Error en listarReservasUsuario', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json(['error' => 'No se pudieron cargar las reservas'], 500);
         }
     }
-    public function mostrarNombrePorLog(Request $request, $reservaId)
+
+   public function mostrarNombrePorLog(Request $request, $reservaId)
 {
     try {
         // Leer token desde cookie HttpOnly
         $token = $request->cookie('access_token');
+
         if (!$token) {
-            return response()->json(['error' => 'Token no proporcionado'], 401);
+            return response()->json([
+                'error' => 'Token no proporcionado'
+            ], 401);
         }
 
         $user = JWTAuth::setToken($token)->authenticate();
+
     } catch (\Exception $e) {
-        Log::error('Token inválido o usuario no autenticado: ' . $e->getMessage());
-        return response()->json(['error' => 'Token inválido o usuario no autenticado'], 401);
+
+        Log::error(
+            'Token inválido o usuario no autenticado: ' .
+            $e->getMessage()
+        );
+
+        return response()->json([
+            'error' => 'Token inválido o usuario no autenticado'
+        ], 401);
     }
 
-    $cliente = Cliente::where('usuario_id', $user->id)->first();
+    // =========================================================
+    // CLIENTE
+    // =========================================================
+
+    $cliente = Cliente::where(
+        'usuario_id',
+        $user->id
+    )->first();
+
     if (!$cliente) {
-        Log::error('Cliente no encontrado para usuario ID: ' . $user->id);
-        return response()->json(['error' => 'Cliente no encontrado'], 404);
+
+        Log::error(
+            'Cliente no encontrado para usuario ID: ' .
+            $user->id
+        );
+
+        return response()->json([
+            'error' => 'Cliente no encontrado'
+        ], 404);
     }
 
-    // Cargar reserva con paquete, participantes, servicios del paquete y servicios personalizados
+    // Obtener usuario para recuperar el email
+    $usuarioCliente = User::find($cliente->usuario_id);
+
+    // =========================================================
+    // RESERVA
+    // =========================================================
+
     $reserva = Reserva::with([
         'paquete.incluye',
-        'participantes',
         'incluye_personalizados',
     ])->find($reservaId);
 
     if (!$reserva) {
-        Log::error("Reserva no encontrada con ID: {$reservaId}");
-        return response()->json(['error' => 'Reserva no encontrada'], 404);
+
+        Log::error(
+            "Reserva no encontrada con ID: {$reservaId}"
+        );
+
+        return response()->json([
+            'error' => 'Reserva no encontrada'
+        ], 404);
     }
 
     $paquete = $reserva->paquete;
-    $esPersonalizado = (int) ($reserva->paquete_id ?? 0) === 0;
+
+    $esPersonalizado = empty($reserva->paquete_id)
+        || (int) $reserva->paquete_id === 0;
+
+    // =========================================================
+    // NOMBRE DEL PAQUETE / DESTINO
+    // =========================================================
 
     $nombrePaquete = $esPersonalizado
         ? ($reserva->destino ?? 'Destino personalizado')
         : ($paquete->nombre ?? ($reserva->destino ?? 'Experiencia'));
 
-    /*
-    |--------------------------------------------------------------------------
-    | FECHAS
-    |--------------------------------------------------------------------------
-    */
+    // =========================================================
+    // FECHAS
+    // =========================================================
+
     $extraerFecha = function ($valor) {
+
         if (empty($valor)) {
             return null;
         }
+
         try {
             return \Carbon\Carbon::parse($valor);
         } catch (\Throwable $e) {
@@ -247,273 +334,1091 @@ class DashboardUserController extends Controller
         }
     };
 
-    $fechaReservaCarbon = $extraerFecha($reserva->fecha_reserva);
-    $fechaInicioCarbon  = $extraerFecha($paquete->fecha_inicio ?? $reserva->fecha_inicio ?? null);
-    $fechaFinCarbon     = $extraerFecha($paquete->fecha_fin ?? $reserva->fecha_fin ?? null);
+    $fechaReservaCarbon = $extraerFecha(
+        $reserva->fecha_reserva
+    );
 
-    $fechaReservaFormatted = $fechaReservaCarbon ? $fechaReservaCarbon->format('d/m/Y') : 'No disponible';
-    $fechaInicio           = $fechaInicioCarbon ? $fechaInicioCarbon->format('d-m-Y') : null;
-    $fechaFin              = $fechaFinCarbon ? $fechaFinCarbon->format('d-m-Y') : null;
-    $fechaInicioFormatted  = $fechaInicioCarbon ? $fechaInicioCarbon->format('d/m/Y') : 'No disponible';
-    $fechaFinFormatted     = $fechaFinCarbon ? $fechaFinCarbon->format('d/m/Y') : 'No disponible';
+    // Para personalizados se utilizan las fechas de la reserva.
+    // Para paquetes se utilizan las fechas del paquete.
+    if ($esPersonalizado) {
 
-    /*
-    |--------------------------------------------------------------------------
-    | DATOS ECONÓMICOS
-    |--------------------------------------------------------------------------
-    */
-    $tipoPago = strtolower((string) ($reserva->metodo_pago ?? ''));
-    $plazas   = (int) ($reserva->num_personas ?? 0);
+        $fechaInicioCarbon = $extraerFecha(
+            $reserva->fecha_inicio
+        );
 
-    $totalPrecioFloat = (float) ($reserva->total_precio ?? 0);
-    $baseImponible    = $totalPrecioFloat > 0 ? $totalPrecioFloat / 1.21 : 0;
-    $iva              = $totalPrecioFloat - $baseImponible;
+        $fechaFinCarbon = $extraerFecha(
+            $reserva->fecha_fin
+        );
 
-    $baseImponibleFormatted = number_format($baseImponible, 2, ',', '.');
-    $ivaFormatted           = number_format($iva, 2, ',', '.');
-    $totalPrecioFormatted   = number_format($totalPrecioFloat, 2, ',', '.');
-    $subtotal               = number_format($totalPrecioFloat, 2, ',', '.');
+    } else {
 
-    $importeAlojamiento = (float) ($reserva->importe_alojamiento ?? 0);
-    $impuestoMunicipal  = (float) ($reserva->impuesto_municipal ?? 0);
+        $fechaInicioCarbon = $extraerFecha(
+            $paquete->fecha_inicio ??
+            $reserva->fecha_inicio ??
+            null
+        );
 
-    /*
-    |--------------------------------------------------------------------------
-    | PARTICIPANTES (relación real)
-    |--------------------------------------------------------------------------
-    */
-    $participantes = $reserva->participantes; // Collection de modelos Participante
+        $fechaFinCarbon = $extraerFecha(
+            $paquete->fecha_fin ??
+            $reserva->fecha_fin ??
+            null
+        );
+    }
 
-    /*
-    |--------------------------------------------------------------------------
-    | SERVICIOS INCLUIDOS (paquete->incluye o incluye_personalizada)
-    |--------------------------------------------------------------------------
-    */
+    $fechaReservaFormatted = $fechaReservaCarbon
+        ? $fechaReservaCarbon->format('d/m/Y')
+        : 'No disponible';
+
+    $fechaInicio = $fechaInicioCarbon
+        ? $fechaInicioCarbon->format('d-m-Y')
+        : 'No disponible';
+
+    $fechaFin = $fechaFinCarbon
+        ? $fechaFinCarbon->format('d-m-Y')
+        : 'No disponible';
+
+    $fechaInicioFormatted = $fechaInicioCarbon
+        ? $fechaInicioCarbon->format('d/m/Y')
+        : 'No disponible';
+
+    $fechaFinFormatted = $fechaFinCarbon
+        ? $fechaFinCarbon->format('d/m/Y')
+        : 'No disponible';
+
+    // =========================================================
+    // DATOS DEL CLIENTE
+    // =========================================================
+
+    $nombreCliente = trim(
+        ($cliente->nombre ?? '') .
+        ' ' .
+        ($cliente->apellidos ?? '')
+    );
+
+    $dniCliente = $cliente->dni ??
+        'No especificado';
+
+    $direccionCliente = $cliente->direccion ??
+        'No especificada';
+
+    $telefonoCliente = $cliente->telefono ??
+        'No especificado';
+
+    // 🔹 EL EMAIL SE OBTIENE DE USERS
+    $emailCliente = $usuarioCliente?->email ??
+        'No especificado';
+
+    // =========================================================
+    // DATOS ECONÓMICOS
+    // =========================================================
+
+    $tipoPago = strtolower(
+        (string) ($reserva->metodo_pago ?? '')
+    );
+
+    $plazas = (int) (
+        $reserva->num_personas ?? 0
+    );
+
+    $totalPrecioFloat = (float) (
+        $reserva->total_precio ?? 0
+    );
+
+    $baseImponible = $totalPrecioFloat > 0
+        ? $totalPrecioFloat / 1.21
+        : 0;
+
+    $iva = $totalPrecioFloat - $baseImponible;
+
+    $baseImponibleFormatted = number_format(
+        $baseImponible,
+        2,
+        ',',
+        '.'
+    );
+
+    $ivaFormatted = number_format(
+        $iva,
+        2,
+        ',',
+        '.'
+    );
+
+    $totalPrecioFormatted = number_format(
+        $totalPrecioFloat,
+        2,
+        ',',
+        '.'
+    );
+
+    $subtotal = number_format(
+        $totalPrecioFloat,
+        2,
+        ',',
+        '.'
+    );
+
+    // =========================================================
+    // NOTAS
+    // =========================================================
+
+    $notas = $reserva->notas ?? '';
+
+    if (is_array($notas)) {
+        $notas = implode("\n", $notas);
+    }
+
+    if (is_object($notas)) {
+        $notas = json_encode(
+            $notas,
+            JSON_UNESCAPED_UNICODE
+        );
+    }
+
+    $notas = (string) $notas;
+
+    // =========================================================
+    // PARTICIPANTES
+    // =========================================================
+
+
+    // =========================================================
+    // SERVICIOS INCLUIDOS
+    // =========================================================
+
     $serviciosIncluidos = $esPersonalizado
         ? $reserva->incluye_personalizados
         : ($paquete->incluye ?? collect());
 
-    /*
-    |--------------------------------------------------------------------------
-    | LOGO
-    |--------------------------------------------------------------------------
-    */
-    $logoPath = public_path('images/logo_factura_negro.png');
+    // =========================================================
+    // FUNCIÓN PARA ESCAPAR HTML
+    // =========================================================
+
+    $esc = function ($value) {
+        return htmlspecialchars(
+            (string) ($value ?? ''),
+            ENT_QUOTES,
+            'UTF-8'
+        );
+    };
+
+    // =========================================================
+    // ESCAPAR DATOS
+    // =========================================================
+
+    $nombreCliente = $esc($nombreCliente);
+    $dniCliente = $esc($dniCliente);
+    $direccionCliente = $esc($direccionCliente);
+    $telefonoCliente = $esc($telefonoCliente);
+    $emailCliente = $esc($emailCliente);
+
+    $nombrePaquete = $esc($nombrePaquete);
+
+    $fechaReservaFormatted = $esc(
+        $fechaReservaFormatted
+    );
+
+    $fechaInicio = $esc($fechaInicio);
+    $fechaFin = $esc($fechaFin);
+
+    $fechaInicioFormatted = $esc(
+        $fechaInicioFormatted
+    );
+
+    $fechaFinFormatted = $esc(
+        $fechaFinFormatted
+    );
+
+    // =========================================================
+    // LOGO
+    // =========================================================
+
+    $logoPath = public_path(
+        'images/logo_factura_negro.png'
+    );
+
     if (file_exists($logoPath)) {
-        $logoBase64 = base64_encode(file_get_contents($logoPath));
-        $logoSrc = 'data:image/png;base64,' . $logoBase64;
+
+        $logoBase64 = base64_encode(
+            file_get_contents($logoPath)
+        );
+
+        $logoSrc =
+            'data:image/png;base64,' .
+            $logoBase64;
+
     } else {
-        $logoSrc = 'data:image/png;base64,' .
+
+        $logoSrc =
+            'data:image/png;base64,' .
             'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMB/eeFmjAAAAAASUVORK5CYII=';
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | HTML PDF (mismo diseño que ReservaConfirmacionMail)
-    |--------------------------------------------------------------------------
-    */
+    // =========================================================
+    // HTML PDF
+    // =========================================================
+
     $htmlPdf = "
 <html>
 <head>
+
 <style>
-@page { margin:10mm 20mm 10mm 10mm; }
-body { font-family:'DejaVu Sans', Arial, sans-serif; color:#333; margin:0; padding:0; }
-h1, h2, h3 { margin:0; padding:0; }
-table { width:100%; border-collapse:collapse; font-size:13px; }
-th, td { padding:12px; }
-th { background:#000000; color:#fff; }
+
+@page {
+    margin:10mm 20mm 10mm 10mm;
+}
+
+body {
+    font-family:'DejaVu Sans', Arial, sans-serif;
+    color:#333;
+    margin:0;
+    padding:0;
+}
+
+h1,
+h2,
+h3 {
+    margin:0;
+    padding:0;
+}
+
+table {
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+}
+
+th,
+td {
+    padding:12px;
+}
+
+th {
+    background:#000000;
+    color:#ffffff;
+}
+
 </style>
+
 </head>
+
 <body>
+
 <div style='padding:30px;'>
 
-    <table width='100%' style='border-bottom:4px solid #000000; margin-bottom:20px; padding-bottom:10px;'>
+    <!-- =====================================================
+         HEADER
+    ====================================================== -->
+
+    <table
+        width='100%'
+        style='
+            border-bottom:4px solid #000000;
+            margin-bottom:20px;
+            padding-bottom:10px;
+        '
+    >
+
         <tr>
-            <td style='width:30%; vertical-align:middle;'>
-                <img src='{$logoSrc}' alt='Logo Empresa' style='height:100px; border-radius:6px;'>
+
+            <td
+                style='
+                    width:30%;
+                    vertical-align:middle;
+                '
+            >
+
+                <img
+                    src='{$logoSrc}'
+                    alt='Logo Empresa'
+                    style='
+                        height:100px;
+                        border-radius:6px;
+                    '
+                >
+
             </td>
-            <td style='width:70%; vertical-align:middle; text-align:right;'>
-                <div style='font-size:11px; color:#000000; text-align:right;'>
-                    <strong>Fecha de emisión:</strong><br>" . date('d/m/Y') . "
+
+            <td
+                style='
+                    width:70%;
+                    vertical-align:middle;
+                    text-align:right;
+                '
+            >
+
+                <div
+                    style='
+                        font-size:11px;
+                        color:#000000;
+                        text-align:right;
+                    '
+                >
+
+                    <strong>
+                        Fecha de emisión:
+                    </strong>
+
+                    <br>
+
+                    " . date('d/m/Y') . "
+
                 </div>
+
             </td>
+
         </tr>
+
     </table>
 
-    <div style='display:table; width:100%; margin-bottom:50px;'>
-        <div style='display:table-cell; width:50%; vertical-align:top; text-align:left;'>
-            <div style='background-color:#f5f5f5; padding:20px; border-radius:10px; border:2px solid #000000;'>
-                <h3 style='color:#000000; font-size:14px; font-weight:bold; margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;'>Datos del emisor</h3>
-                <div style='font-size:13px; line-height:1.3;'>
-                    <p style='margin:0 0 4px 0;'><strong>Atalanta</strong></p>
-                    <p style='margin:0 0 3px 0;'>Dirección: Villanueva de los Castillejos, Huelva, España</p>
-                    <p style='margin:0 0 3px 0;'>Tel: +34 614 892 722</p>
-                    <p style='margin:0 0 3px 0;'>Email: info@viajesatalanta.com</p>
-                    <p style='margin:0 0 6px 0;'>Web: www.viajesatalanta.com</p>
+
+    <!-- =====================================================
+         DATOS EMISOR Y CLIENTE
+    ====================================================== -->
+
+    <div
+        style='
+            display:table;
+            width:100%;
+            margin-bottom:50px;
+        '
+    >
+
+        <!-- EMISOR -->
+
+        <div
+            style='
+                display:table-cell;
+                width:50%;
+                vertical-align:top;
+                text-align:left;
+            '
+        >
+
+            <div
+                style='
+                    background-color:#f5f5f5;
+                    padding:20px;
+                    border-radius:10px;
+                    border:2px solid #000000;
+                '
+            >
+
+                <h3
+                    style='
+                        color:#000000;
+                        font-size:14px;
+                        font-weight:bold;
+                        margin-bottom:10px;
+                        text-transform:uppercase;
+                        letter-spacing:1px;
+                    '
+                >
+                    Datos del emisor
+                </h3>
+
+                <div
+                    style='
+                        font-size:13px;
+                        line-height:1.3;
+                    '
+                >
+
+                    <p style='margin:0 0 4px 0;'>
+                        <strong>
+                            Atalanta
+                        </strong>
+                    </p>
+
+                    <p style='margin:0 0 3px 0;'>
+                        Dirección:
+                        Villanueva de los Castillejos,
+                        Huelva, España
+                    </p>
+
+                    <p style='margin:0 0 3px 0;'>
+                        Tel: +34 614 892 722
+                    </p>
+
+                    <p style='margin:0 0 3px 0;'>
+                        Email: info@viajesatalanta.com
+                    </p>
+
+                    <p style='margin:0 0 6px 0;'>
+                        Web: www.viajesatalanta.com
+                    </p>
+
                 </div>
+
             </div>
+
         </div>
-        <div style='display:table-cell; width:50%; vertical-align:top; text-align:right;'>
-            <div style='background-color:#f5f5f5; padding:20px; border-radius:10px; border:2px solid #000000; display:inline-block; text-align:left;'>
-                <h3 style='color:#000000; font-size:14px; font-weight:bold; margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;'>Datos del cliente</h3>
-                <div style='font-size:13px; line-height:1.3;'>
-                    <p><strong>Nombre: {$cliente->nombre} {$cliente->apellidos}</strong></p>
-                    <p style='margin:0 0 3px 0;'>DNI: {$cliente->dni}</p>
-                    <p style='margin:0 0 3px 0;'>Dirección: {$cliente->direccion}</p>
-                    <p style='margin:0 0 3px 0;'>Tel: {$cliente->telefono}</p>
-                    <p style='margin:0 0 3px 0;'>Email: {$cliente->email}</p>
+
+
+        <!-- CLIENTE -->
+
+        <div
+            style='
+                display:table-cell;
+                width:50%;
+                vertical-align:top;
+                text-align:right;
+            '
+        >
+
+            <div
+                style='
+                    background-color:#f5f5f5;
+                    padding:20px;
+                    border-radius:10px;
+                    border:2px solid #000000;
+                    display:inline-block;
+                    text-align:left;
+                '
+            >
+
+                <h3
+                    style='
+                        color:#000000;
+                        font-size:14px;
+                        font-weight:bold;
+                        margin-bottom:10px;
+                        text-transform:uppercase;
+                        letter-spacing:1px;
+                    '
+                >
+                    Datos del cliente
+                </h3>
+
+                <div
+                    style='
+                        font-size:13px;
+                        line-height:1.3;
+                    '
+                >
+
+                    <p style='margin:0 0 4px 0;'>
+                        <strong>
+                            {$nombreCliente}
+                        </strong>
+                    </p>
+
+                    <p style='margin:0 0 3px 0;'>
+                        DNI: {$dniCliente}
+                    </p>
+
+                    <p style='margin:0 0 3px 0;'>
+                        Dirección: {$direccionCliente}
+                    </p>
+
+                    <p style='margin:0 0 3px 0;'>
+                        Tel: {$telefonoCliente}
+                    </p>
+
+                    <p style='margin:0 0 3px 0;'>
+                        Email: {$emailCliente}
+                    </p>
+
                 </div>
+
             </div>
+
         </div>
+
     </div>
 
-    <div style='background-color:#f5f5f5; padding:20px; border-radius:10px; margin-bottom:30px; border:1px solid rgba(138,119,90,0.2);'>
-        <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>Detalles de la experiencia</h3>
+
+    <!-- =====================================================
+         DETALLES DE LA EXPERIENCIA
+    ====================================================== -->
+
+    <div
+        style='
+            background-color:#f5f5f5;
+            padding:20px;
+            border-radius:10px;
+            margin-bottom:30px;
+            border:1px solid rgba(138,119,90,0.2);
+        '
+    >
+
+        <h3
+            style='
+                color:#000000;
+                font-size:16px;
+                font-weight:bold;
+                margin-bottom:15px;
+            '
+        >
+            Detalles de la experiencia
+        </h3>
+
         <table>
+
             <tr>
-                <td style='width:50%; padding:5px 10px; vertical-align:top;'>
-                    <strong>Experiencia:</strong><br>
-                    <span style='font-size:12px;'><strong>{$nombrePaquete}</strong></span><br><br>
-                    <strong>Fecha de reserva:</strong><br>{$fechaReservaFormatted}<br><br>
-                    <strong>Fecha de entrada:</strong><br>{$fechaInicioFormatted}
+
+                <td
+                    style='
+                        width:50%;
+                        padding:5px 10px;
+                        vertical-align:top;
+                    '
+                >
+
+                    <strong>
+                        Experiencia:
+                    </strong>
+
+                    <br>
+
+                    <span style='font-size:12px;'>
+                        <strong>
+                            {$nombrePaquete}
+                        </strong>
+                    </span>
+
+                    <br><br>
+
+                    <strong>
+                        Fecha de reserva:
+                    </strong>
+
+                    <br>
+
+                    {$fechaReservaFormatted}
+
+                    <br><br>
+
+                    <strong>
+                        Fecha de ida:
+                    </strong>
+
+                    <br>
+
+                    {$fechaInicioFormatted}
+
                 </td>
-                <td style='width:50%; padding:5px 10px; vertical-align:top;'>
-                    <strong>Fecha de salida:</strong><br>{$fechaFinFormatted}<br><br>
-                    <strong>Número de viajeros:</strong><br>{$plazas}" . ($plazas == 1 ? ' persona' : ' personas') . "
+
+
+                <td
+                    style='
+                        width:50%;
+                        padding:5px 10px;
+                        vertical-align:top;
+                    '
+                >
+
+                    <strong>
+                        Fecha de vuelta:
+                    </strong>
+
+                    <br>
+
+                    {$fechaFinFormatted}
+
+                    <br><br>
+
+                    <strong>
+                        Número de viajeros:
+                    </strong>
+
+                    <br>
+
+                    {$plazas}
+";
+
+    $htmlPdf .= $plazas == 1
+        ? " persona"
+        : " personas";
+
+    $htmlPdf .= "
                 </td>
+
             </tr>
+
         </table>
+
     </div>
 
-    <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>Viajeros</h3>
-    <div style='margin-bottom:30px;'>
-        <table>
-            <thead>
-                <tr style='background-color:#000000; color:#ffffff;'>
-                    <th style='padding:12px; text-align:left;'>Nombre</th>
-                    <th style='padding:12px; text-align:left;'>Apellidos</th>
-                    <th style='padding:12px; text-align:center;'>DNI</th>
-                    <th style='padding:12px; text-align:left;'>Email</th>
-                </tr>
-            </thead>
-            <tbody>";
-                if ($participantes && $participantes->count() > 0) {
-                    foreach ($participantes as $p) {
-                        $nombreP    = $p->nombre ?? 'Nombre no disponible';
-                        $apellidosP = $p->apellidos ?? '';
-                        $dni        = $p->dni ?? 'N/A';
-                        $emailP     = $p->email ?? 'Email no disponible';
-                        $htmlPdf .= "
-                <tr style='background-color:#f5f5f5;'>
-                    <td style='padding:12px; border-bottom:1px solid rgba(0,0,0,0.15);'>{$nombreP}</td>
-                    <td style='padding:12px; border-bottom:1px solid rgba(0,0,0,0.15);'>{$apellidosP}</td>
-                    <td style='padding:12px; text-align:center; border-bottom:1px solid rgba(0,0,0,0.15);'>{$dni}</td>
-                    <td style='padding:12px; border-bottom:1px solid rgba(0,0,0,0.15);'>{$emailP}</td>
-                </tr>";
-                    }
-                } else {
-                    $htmlPdf .= "
-                <tr>
-                    <td colspan='4' style='padding:15px 12px; text-align:center; color:#888;'>No hay viajeros registrados.</td>
-                </tr>";
-                }
-    $htmlPdf .= "
-            </tbody>
-        </table>
-    </div>
 
-    <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>Servicios incluidos</h3>
-    <div style='margin-bottom:30px;'>
-        <table>
-            <thead>
-                <tr style='background-color:#000000; color:#ffffff;'>
-                    <th style='padding:12px; text-align:left;'>Descripción</th>
-                    <th style='padding:12px; text-align:right;'>Precio</th>
-                </tr>
-            </thead>
-            <tbody>";
-                if ($serviciosIncluidos && $serviciosIncluidos->count() > 0) {
-                    foreach ($serviciosIncluidos as $index => $servicio) {
-                        $bg     = $index % 2 === 0 ? '#ffffff' : '#f5f5f5';
-                        $desc   = $servicio->descripcion ?? '';
-                        $precio = $servicio->precio ?? 0;
-                        $htmlPdf .= "
-                <tr style='background-color:{$bg};'>
-                    <td style='padding:15px 12px; border-bottom:1px solid rgba(0,0,0,0.15);'>{$desc}</td>
-                    <td style='padding:15px 12px; text-align:right; border-bottom:1px solid rgba(0,0,0,0.15);'>" . number_format((float) $precio, 2, ',', '.') . " €</td>
-                </tr>";
-                    }
-                } else {
-                    $htmlPdf .= "
-                <tr>
-                    <td colspan='2' style='padding:15px 12px; text-align:center; color:#888;'>No hay servicios adicionales incluidos.</td>
-                </tr>";
-                }
-    $htmlPdf .= "
-            </tbody>
-        </table>
-    </div>
+    <!-- =====================================================
+         SERVICIOS INCLUIDOS
+    ====================================================== -->
 
-    <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>Gastos de gestión incluidos.</h5>
-    <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>Importe a pagar en el alojamiento: " . number_format($importeAlojamiento, 2, ',', '.') . " €</h5>
-    <h5 style='color:#000000; font-size:13px; font-weight:bold; margin-bottom:15px;'>Impuesto municipal: " . number_format($impuestoMunicipal, 2, ',', '.') . " €</h5>
+    <h3
+        style='
+            color:#000000;
+            font-size:16px;
+            font-weight:bold;
+            margin-bottom:15px;
+        '
+    >
+        Servicios incluidos
+    </h3>
 
-    <h3 style='color:#000000; font-size:16px; font-weight:bold; margin-bottom:15px;'>Experiencia</h3>
-    <div style='margin-bottom:30px;'>
+    <div style='margin-bottom:20px;'>
+
         <table>
+
             <thead>
-                <tr style='background-color:#000000; color:#ffffff;'>
-                    <th style='padding:12px; text-align:left;'>Destino y fecha</th>
-                    <th style='padding:12px; text-align:center;'>Nº de viajeros</th>
-                    <th style='padding:12px; text-align:right;'>" . ($tipoPago === 'parcial' ? 'Importe Total' : 'Importe') . "</th>
+
+                <tr
+                    style='
+                        background-color:#000000;
+                        color:#ffffff;
+                    '
+                >
+
+                    <th
+                        style='
+                            padding:12px;
+                            text-align:left;
+                        '
+                    >
+                        Descripción
+                    </th>
+
+                    <th
+                        style='
+                            padding:12px;
+                            text-align:right;
+                        '
+                    >
+                        Precio
+                    </th>
+
                 </tr>
+
             </thead>
+
             <tbody>
-                <tr style='background-color:#f5f5f5;'>
-                    <td style='padding:15px 12px; border-bottom:1px solid rgba(0,0,0,0.15);'>
-                        <strong>{$nombrePaquete}</strong><br>
-                        <span style='font-size:11px; color:#000000;'>Del {$fechaInicio} al {$fechaFin}</span>
+";
+
+    if (
+        $serviciosIncluidos &&
+        $serviciosIncluidos->count() > 0
+    ) {
+
+        foreach (
+            $serviciosIncluidos as $index => $servicio
+        ) {
+
+            $bg = $index % 2 === 0
+                ? '#ffffff'
+                : '#f5f5f5';
+
+            $desc = $esc(
+                $servicio->descripcion ?? ''
+            );
+
+            $precio = (float) (
+                $servicio->precio ?? 0
+            );
+
+            $precioFormatted = number_format(
+                $precio,
+                2,
+                ',',
+                '.'
+            );
+
+            $htmlPdf .= "
+                <tr
+                    style='
+                        background-color:{$bg};
+                    '
+                >
+
+                    <td
+                        style='
+                            padding:15px 12px;
+                            border-bottom:
+                            1px solid rgba(0,0,0,0.15);
+                        '
+                    >
+                        {$desc}
                     </td>
-                    <td style='padding:15px 12px; text-align:center; border-bottom:1px solid rgba(0,0,0,0.15);'>
-                        {$plazas}" . ($plazas == 1 ? ' persona' : ' personas') . "
+
+                    <td
+                        style='
+                            padding:15px 12px;
+                            text-align:right;
+                            border-bottom:
+                            1px solid rgba(0,0,0,0.15);
+                        '
+                    >
+                        {$precioFormatted} €
                     </td>
-                    <td style='padding:15px 12px; text-align:right; border-bottom:1px solid rgba(0,0,0,0.15);'>
-                        <strong>{$subtotal} €</strong>
-                    </td>
+
                 </tr>
+";
+        }
+
+    } else {
+
+        $htmlPdf .= "
+                <tr>
+
+                    <td
+                        colspan='2'
+                        style='
+                            padding:15px 12px;
+                            text-align:center;
+                            color:#888;
+                        '
+                    >
+                        No hay servicios adicionales incluidos.
+                    </td>
+
+                </tr>
+";
+    }
+
+    $htmlPdf .= "
             </tbody>
+
         </table>
+
     </div>
 
-    <div style='width:100%; margin-top:20px;'>
-        <div style='width:300px; float:right;'>
-            <div style='background-color:#f5f5f5; padding:20px; border-radius:10px; border:2px solid #000000;'>
-                <div style='display:flex; justify-content:space-between; margin-bottom:10px; font-size:13px;'>
-                    <span>Subtotal:</span><span>{$baseImponibleFormatted} €</span>
+
+    <!-- =====================================================
+         NOTAS
+    ====================================================== -->
+";
+
+    if (!empty(trim($notas))) {
+
+        $notasPdf = nl2br(
+            htmlspecialchars(
+                $notas,
+                ENT_QUOTES,
+                'UTF-8'
+            )
+        );
+
+        $htmlPdf .= "
+    <h5
+        style='
+            color:#000000;
+            font-size:13px;
+            font-weight:bold;
+            margin-top:10px;
+            margin-bottom:15px;
+            line-height:1.5;
+        '
+    >
+
+        Notas:<br>
+
+        <span style='font-weight:normal;'>
+            {$notasPdf}
+        </span>
+
+    </h5>
+";
+    }
+
+
+    // =========================================================
+    // GASTOS DE GESTIÓN
+    // =========================================================
+
+    $htmlPdf .= "
+    <h5
+        style='
+            color:#000000;
+            font-size:13px;
+            font-weight:bold;
+            margin-bottom:15px;
+        '
+    >
+        Gastos de gestión incluidos.
+    </h5>
+
+
+    <!-- =====================================================
+         EXPERIENCIA
+    ====================================================== -->
+
+    <h3
+        style='
+            color:#000000;
+            font-size:16px;
+            font-weight:bold;
+            margin-bottom:15px;
+        '
+    >
+        Experiencia
+    </h3>
+
+    <div style='margin-bottom:30px;'>
+
+        <table>
+
+            <thead>
+
+                <tr
+                    style='
+                        background-color:#000000;
+                        color:#ffffff;
+                    '
+                >
+
+                    <th
+                        style='
+                            padding:12px;
+                            text-align:left;
+                        '
+                    >
+                        Destino y fecha
+                    </th>
+
+                    <th
+                        style='
+                            padding:12px;
+                            text-align:center;
+                        '
+                    >
+                        Nº de viajeros
+                    </th>
+
+                    <th
+                        style='
+                            padding:12px;
+                            text-align:right;
+                        '
+                    >
+";
+
+    $htmlPdf .= $tipoPago === 'parcial'
+        ? 'Importe Total'
+        : 'Importe';
+
+    $htmlPdf .= "
+                    </th>
+
+                </tr>
+
+            </thead>
+
+            <tbody>
+
+                <tr
+                    style='
+                        background-color:#f5f5f5;
+                    '
+                >
+
+                    <td
+                        style='
+                            padding:15px 12px;
+                            border-bottom:
+                            1px solid rgba(0,0,0,0.15);
+                        '
+                    >
+
+                        <strong>
+                            {$nombrePaquete}
+                        </strong>
+
+                        <br>
+
+                        <span
+                            style='
+                                font-size:11px;
+                                color:#000000;
+                            '
+                        >
+                            Del {$fechaInicio}
+                            al {$fechaFin}
+                        </span>
+
+                    </td>
+
+                    <td
+                        style='
+                            padding:15px 12px;
+                            text-align:center;
+                            border-bottom:
+                            1px solid rgba(0,0,0,0.15);
+                        '
+                    >
+                        {$plazas}
+";
+
+    $htmlPdf .= $plazas == 1
+        ? ' persona'
+        : ' personas';
+
+    $htmlPdf .= "
+                    </td>
+
+                    <td
+                        style='
+                            padding:15px 12px;
+                            text-align:right;
+                            border-bottom:
+                            1px solid rgba(0,0,0,0.15);
+                        '
+                    >
+                        <strong>
+                            {$subtotal} €
+                        </strong>
+                    </td>
+
+                </tr>
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+
+    <!-- =====================================================
+         TOTALES
+    ====================================================== -->
+
+    <div
+        style='
+            width:100%;
+            margin-top:20px;
+        '
+    >
+
+        <div
+            style='
+                width:300px;
+                float:right;
+            '
+        >
+
+            <div
+                style='
+                    background-color:#f5f5f5;
+                    padding:20px;
+                    border-radius:10px;
+                    border:2px solid #000000;
+                '
+            >
+
+                <div
+                    style='
+                        margin-bottom:10px;
+                        font-size:13px;
+                    '
+                >
+
+                    <span>
+                        Subtotal:
+                    </span>
+
+                    <span style='float:right;'>
+                        {$baseImponibleFormatted} €
+                    </span>
+
                 </div>
-                <div style='display:flex; justify-content:space-between; margin-bottom:15px; font-size:13px; padding-bottom:15px; border-bottom:2px solid rgba(0,0,0,0.3);'>
-                    <span>IVA (21%):</span><span>{$ivaFormatted} €</span>
+
+
+                <div
+                    style='
+                        margin-bottom:15px;
+                        font-size:13px;
+                        padding-bottom:15px;
+                        border-bottom:
+                        2px solid rgba(0,0,0,0.3);
+                    '
+                >
+
+                    <span>
+                        IVA (21%):
+                    </span>
+
+                    <span style='float:right;'>
+                        {$ivaFormatted} €
+                    </span>
+
                 </div>
-                <div style='display:flex; justify-content:space-between; font-size:15px; font-weight:bold;'>
-                    <span>TOTAL:</span><span>{$totalPrecioFormatted} €</span>
+
+
+                <div
+                    style='
+                        font-size:15px;
+                        font-weight:bold;
+                    '
+                >
+
+                    <span>
+                        TOTAL:
+                    </span>
+
+                    <span style='float:right;'>
+                        {$totalPrecioFormatted} €
+                    </span>
+
                 </div>
+
+                <div style='clear:both;'></div>
+
             </div>
+
         </div>
+
         <div style='clear:both;'></div>
+
     </div>
 
-    <div style='margin-top:40px; padding-top:20px; border-top:2px solid #000000; font-size:11px; color:#000000; text-align:center;'>
-        <p style='margin:0 0 5px 0;'><strong>Gracias por confiar en Atalanta</strong></p>
-        <p style='margin:0; opacity:0.8;'>Esta factura ha sido generada electrónicamente y es válida sin firma ni sello.</p>
-        <p style='margin:5px 0 0 0; opacity:0.8;'>Para cualquier consulta, contacte con nosotros en info@viajesatalanta.com o llame al +34 614 892 722</p>
+
+    <!-- =====================================================
+         FOOTER
+    ====================================================== -->
+
+    <div
+        style='
+            margin-top:40px;
+            padding-top:20px;
+            border-top:2px solid #000000;
+            font-size:11px;
+            color:#000000;
+            text-align:center;
+        '
+    >
+
+        <p style='margin:0 0 5px 0;'>
+            <strong>
+                Gracias por confiar en Atalanta
+            </strong>
+        </p>
+
+        <p style='margin:0; opacity:0.8;'>
+            Esta factura ha sido generada electrónicamente
+            y es válida sin firma ni sello.
+        </p>
+
+        <p style='margin:5px 0 0 0; opacity:0.8;'>
+            Para cualquier consulta, contacte con nosotros
+            en info@viajesatalanta.com
+            o llame al +34 614 892 722
+        </p>
+
     </div>
 
 </div>
+
 </body>
-</html>";
+</html>
+";
 
-    $pdf = PDF::loadHTML($htmlPdf)->setPaper('A4');
+    // =========================================================
+    // GENERAR PDF
+    // =========================================================
 
-    return $pdf->download("factura_reserva_{$reservaId}.pdf");
+    $pdf = PDF::loadHTML($htmlPdf)
+        ->setPaper('A4');
+
+    return $pdf->download(
+        "factura_reserva_{$reservaId}.pdf"
+    );
 }
 }

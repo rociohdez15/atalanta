@@ -14,6 +14,9 @@ import { Link, useLocation } from "react-router-dom";
 import ExperienciaFilter from "./ExperienciaFilter";
 import OfertaFilter from "./OfertaFilter";
 
+// Ofertas que se marcan como agotadas cuando no quedan plazas
+const OFERTAS_CON_STOCK_LIMITADO = ["black_friday", "cyber_monday"];
+
 const Experiencia = () => {
     const [imagenes, setImagenes] = useState([]);
     const [pagina, setPagina] = useState(0);
@@ -418,9 +421,11 @@ const Experiencia = () => {
                             const esProximamente =
                                 img.estado === "proximamente";
 
-                            const esBlackFridayAgotado =
-                                img.oferta === "black_friday" &&
-                                img.plazas <= 0;
+                            // Black Friday y Cyber Monday: agotado si no quedan plazas
+                            const esOfertaAgotada =
+                                OFERTAS_CON_STOCK_LIMITADO.includes(
+                                    img.oferta,
+                                ) && img.plazas <= 0;
 
                             return (
                                 <motion.div
@@ -535,7 +540,7 @@ const Experiencia = () => {
 
                                             {/* SOLD OUT */}
 
-                                            {esBlackFridayAgotado && (
+                                            {esOfertaAgotada && (
                                                 <div
                                                     className="position-absolute top-50 start-50"
                                                     style={{
@@ -567,8 +572,6 @@ const Experiencia = () => {
                                                     &nbsp;&nbsp; SOLD OUT
                                                 </div>
                                             )}
-
-                                            {/* PRECIO */}
 
                                             {/* =================================================
                                                 PRECIO
@@ -793,7 +796,7 @@ const Experiencia = () => {
                                                 >
                                                     Próximamente
                                                 </div>
-                                            ) : esBlackFridayAgotado ? (
+                                            ) : esOfertaAgotada ? (
                                                 <button
                                                     type="button"
                                                     disabled
